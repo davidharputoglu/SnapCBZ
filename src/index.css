@@ -1,0 +1,83 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-turquoise-50: #f0fdfa;
+  --color-turquoise-100: #ccfbf1;
+  --color-turquoise-200: #99f6e4;
+  --color-turquoise-300: #5eead4;
+  --color-turquoise-400: #2dd4bf;
+  --color-turquoise-500: #14b8a6;
+  --color-turquoise-600: #0d9488;
+  --color-turquoise-700: #0f766e;
+  --color-turquoise-800: #115e59;
+  --color-turquoise-900: #134e4a;
+  --color-turquoise-950: #042f2e;
+}
+
+@layer base {
+  :root {
+    --background: #f8fafc;
+    --foreground: #0f172a;
+    --card: #ffffff;
+    --card-foreground: #0f172a;
+    --border: #e2e8f0;
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    
+    /* Default Turquoise Theme */
+    --primary: #14b8a6;
+    --primary-foreground: #ffffff;
+  }
+
+  .dark {
+    --background: #0f172a;
+    --foreground: #f8fafc;
+    --card: #1e293b;
+    --card-foreground: #f8fafc;
+    --border: #334155;
+    --muted: #0b1120;
+    --muted-foreground: #94a3b8;
+  }
+
+  .black-theme {
+    --background: #000000;
+    --foreground: #f8fafc;
+    --card: #0a0a0a;
+    --card-foreground: #f8fafc;
+    --border: #262626;
+    --muted: #171717;
+    --muted-foreground: #a3a3a3;
+  }
+
+  /* Theme Color Overrides */
+  :root[data-theme-color="blue"] {
+    --primary: #3b82f6;
+  }
+  :root[data-theme-color="purple"] {
+    --primary: #8b5cf6;
+  }
+  :root[data-theme-color="rose"] {
+    --primary: #f43f5e;
+  }
+  :root[data-theme-color="orange"] {
+    --primary: #f97316;
+  }
+  :root[data-theme-color="emerald"] {
+    --primary: #10b981;
+  }
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+}

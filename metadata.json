@@ -1,0 +1,5 @@
+{
+  "name": "SnapCBZ",
+  "description": "Application de téléchargement et de conversion de fichiers compressés d'images en .cbz avec tri par langue.",
+  "requestFramePermissions": []
+}
