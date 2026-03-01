@@ -371,6 +371,21 @@ const DirectoryInput: React.FC<{
   icon: React.ReactNode;
 }> = ({ label, value, onChange, icon }) => {
   const { t } = useTranslation();
+
+  const handleBrowse = async () => {
+    try {
+      // @ts-ignore
+      const { ipcRenderer } = window.require('electron');
+      const result = await ipcRenderer.invoke('dialog:openDirectory');
+      if (result) {
+        onChange(result);
+      }
+    } catch (error) {
+      console.error('Failed to open directory dialog:', error);
+      alert(t("alert_browse"));
+    }
+  };
+
   return (
     <div>
       <label className="flex items-center gap-2 text-sm font-medium text-foreground mb-2">
@@ -388,9 +403,7 @@ const DirectoryInput: React.FC<{
         <button
           type="button"
           className="px-4 py-3 bg-muted hover:bg-muted/80 text-foreground rounded-xl border border-border transition-colors flex items-center gap-2"
-          onClick={() =>
-            alert(t("alert_browse"))
-          }
+          onClick={handleBrowse}
         >
           <Folder className="w-5 h-5" />
           {t("set_browse")}

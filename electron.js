@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
@@ -19,7 +19,7 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
     },
-    icon: path.join(__dirname, 'public', 'icon.png'),
+    icon: isDev ? path.join(__dirname, 'public', 'icon.png') : path.join(__dirname, 'dist', 'icon.png'),
     autoHideMenuBar: true,
   });
 
@@ -51,6 +51,17 @@ function createWindow() {
 // IPC Listeners for manual update check
 ipcMain.on('check_for_updates', () => {
   autoUpdater.checkForUpdatesAndNotify();
+});
+
+ipcMain.handle('dialog:openDirectory', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    properties: ['openDirectory']
+  });
+  if (canceled) {
+    return null;
+  } else {
+    return filePaths[0];
+  }
 });
 
 ipcMain.on('restart_app', () => {
