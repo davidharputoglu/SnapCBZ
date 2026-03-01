@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+const { ipcRenderer } = window.require ? window.require("electron") : { ipcRenderer: null };
 
 export interface CustomLanguage {
   id: string;
@@ -149,6 +150,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     document.documentElement.dir = settings.appLanguage === "ar" ? "rtl" : "ltr";
   }, [settings]);
 
+  useEffect(() => {
+    if (!ipcRenderer) return;
+
+    const handleProgress = (event: any, data: any) => {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === data.id ? { ...t, ...data } : t))
+      );
+    };
+
+    ipcRenderer.on("download-progress", handleProgress);
+    return () => {
+      ipcRenderer.removeListener("download-progress", handleProgress);
+    };
+  }, []);
+
   const updateSettings = (newSettings: Partial<Settings>) => {
     setSettings((prev) => ({ ...prev, ...newSettings }));
   };
@@ -169,64 +185,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           tag = decodeURIComponent(tagMatch[1]).replace(/\+/g, " ");
         }
 
-        const totalPages = Math.floor(Math.random() * 3) + 1; // 1 to 3 pages
-
         const initialTask: DownloadTask = {
           id,
           url,
           type: "images",
-          filename: `Scanning: ${tag} (Page 1/${totalPages})...`,
-          status: "scraping",
+          filename: `Downloading images for: ${tag}`,
+          status: "queued",
           progress: 0,
+          copyright: tag.split(" ")[0] || "unknown",
+          character: tag,
         };
 
         setTasks((prev) => [initialTask, ...prev]);
-
-        let currentPage = 1;
-        const scanInterval = setInterval(() => {
-          currentPage++;
-          if (currentPage <= totalPages) {
-            setTasks((prev) => prev.map(t => 
-              t.id === id ? { 
-                ...t, 
-                filename: `Scanning: ${tag} (Page ${currentPage}/${totalPages})...`, 
-                progress: (currentPage / totalPages) * 100 
-              } : t
-            ));
-          } else {
-            clearInterval(scanInterval);
-            
-            // Remove the scraping task
-            setTasks((prev) => prev.filter((t) => t.id !== id));
-            
-            // Simulate finding characters for this copyright
-            const characters = ["iono (pokemon)", "jessie (pokemon)", "pokemon trainer", "unknown character"];
-            const numItems = Math.floor(Math.random() * 3) + 1;
-            const newTasks: DownloadTask[] = [];
-            
-            for (let i = 0; i < numItems; i++) {
-              const newId = Math.random().toString(36).substring(2, 9);
-              const char = characters[Math.floor(Math.random() * characters.length)];
-              const totalImages = Math.floor(Math.random() * 40) + 10; // 10 to 50 images
-              
-              newTasks.push({
-                id: newId,
-                url,
-                type: "images",
-                filename: `Downloading images for: ${char}`,
-                status: "queued",
-                progress: 0,
-                copyright: tag.split(" ")[0] || "pokemon", // Mock copyright
-                character: char,
-                downloadedCount: 0,
-                totalImages,
-              });
-            }
-            
-            setTasks((prev) => [...newTasks, ...prev]);
-            newTasks.forEach((task) => simulateImageProcess(task.id, task.copyright!, task.character!, task.totalImages!));
-          }
-        }, 1000);
+        
+        if (ipcRenderer) {
+          ipcRenderer.send("start-download", { task: initialTask, settings: settingsRef.current });
+        } else {
+          simulateImageProcess(initialTask.id, initialTask.copyright!, initialTask.character!, 10);
+        }
 
       } else {
         // CBZ Mode
@@ -242,64 +218,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           }
         }
 
-        const totalPages = Math.floor(Math.random() * 4) + 2; // 2 to 5 pages
+        const currentSettings = settingsRef.current;
+        const configuredLangs = currentSettings.languages || [];
+        const availableLangs = configuredLangs.length > 0 ? configuredLangs.map(l => l.id) : ["other"];
+        const lang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
 
         const initialTask: DownloadTask = {
           id,
           url,
           type: "cbz",
-          filename: `Scanning: ${category} (Page 1/${totalPages})...`,
-          status: "scraping",
+          filename: `Gallery from ${new URL(url).hostname}`,
+          status: "queued",
           progress: 0,
+          language: lang,
           category,
         };
 
         setTasks((prev) => [initialTask, ...prev]);
-
-        let currentPage = 1;
-        const scanInterval = setInterval(() => {
-          currentPage++;
-          if (currentPage <= totalPages) {
-            setTasks((prev) => prev.map(t => 
-              t.id === id ? { 
-                ...t, 
-                filename: `Scanning: ${category} (Page ${currentPage}/${totalPages})...`, 
-                progress: (currentPage / totalPages) * 100 
-              } : t
-            ));
-          } else {
-            clearInterval(scanInterval);
-
-            const currentSettings = settingsRef.current;
-            const configuredLangs = currentSettings.languages || [];
-            const availableLangs = configuredLangs.length > 0 ? configuredLangs.map(l => l.id) : ["other"];
-            
-            setTasks((prev) => prev.filter((t) => t.id !== id));
-            
-            const numItems = Math.floor(Math.random() * 8) + 4; // 4 to 11 items
-            const newTasks: DownloadTask[] = [];
-            
-            for (let i = 0; i < numItems; i++) {
-              const newId = Math.random().toString(36).substring(2, 9);
-              const lang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
-              const filename = `${category} - Gallery ${Math.floor(Math.random() * 10000)}.cbz`;
-              
-              newTasks.push({
-                id: newId,
-                url,
-                type: "cbz",
-                filename,
-                status: "queued",
-                progress: 0,
-                language: lang,
-                category: category,
-              });
-            }
-            
-            setTasks((prev) => [...newTasks, ...prev]);
-            newTasks.forEach((task) => simulateProcess(task.id, task.filename, task.language!, task.category!));
-          }
-        }, 1200);
+        
+        if (ipcRenderer) {
+          ipcRenderer.send("start-download", { task: initialTask, settings: settingsRef.current });
+        } else {
+          simulateProcess(initialTask.id, initialTask.filename, initialTask.language!, initialTask.category!);
+        }
       }
     });
   };

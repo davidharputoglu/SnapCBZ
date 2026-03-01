@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
+import { startDownload } from './downloader.js';
 const { autoUpdater } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -66,6 +67,13 @@ ipcMain.handle('dialog:openDirectory', async () => {
 
 ipcMain.on('restart_app', () => {
   autoUpdater.quitAndInstall();
+});
+
+ipcMain.on('start-download', async (event, { task, settings }) => {
+  const win = BrowserWindow.getAllWindows()[0];
+  if (win) {
+    startDownload(task, win, settings);
+  }
 });
 
 app.whenReady().then(() => {

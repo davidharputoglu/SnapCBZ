@@ -1,5 +1,5 @@
 import React from "react";
-import { Download, Settings, Info } from "lucide-react";
+import { Download, Settings, Box, Info } from "lucide-react";
 import { useAppStore } from "../store";
 import { useTranslation } from "../translations";
 
@@ -22,7 +22,7 @@ export const Layout: React.FC<LayoutProps> = ({
       {/* Sidebar */}
       <div className="w-64 bg-card dark:bg-card border-r border-border flex flex-col">
         <div className="p-6 flex items-center gap-3 text-primary">
-          <img src="/icon.png" alt="SnapCBZ Logo" className="w-8 h-8 object-contain" />
+          <Box className="w-8 h-8" />
           <span className="text-xl font-bold tracking-tight">SnapCBZ</span>
         </div>
 
