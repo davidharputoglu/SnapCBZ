@@ -32,7 +32,7 @@
       "electron.js"
     ],
     "win": {
-      "icon": "public/icon.png",
+      "icon": "public/icon.ico",
       "target": [
         "nsis",
         "portable"
