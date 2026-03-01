@@ -4,15 +4,16 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: # Permet de lancer la compilation manuellement
+  workflow_dispatch:
 
 permissions:
-  contents: write # Autorise GitHub à créer la Release et uploader les fichiers
+  contents: write
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false # Empêche l'annulation de Windows si Linux plante
       matrix:
         os: [windows-latest, ubuntu-latest]
 
@@ -30,7 +31,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libarchive-tools snapcraft
+          sudo apt-get install -y rpm libarchive-tools
 
       - name: Install Dependencies
         run: npm install

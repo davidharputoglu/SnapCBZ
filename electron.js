@@ -1,6 +1,11 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
-const path = require('path');
-const { autoUpdater } = require('electron-updater');
+import { app, BrowserWindow, ipcMain } from 'electron';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import pkg from 'electron-updater';
+const { autoUpdater } = pkg;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const isDev = process.env.NODE_ENV === 'development';
 
