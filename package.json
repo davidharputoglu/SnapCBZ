@@ -42,8 +42,6 @@
         "AppImage",
         "deb",
         "rpm",
-        "snap",
-        "flatpak",
         "tar.gz"
       ],
       "category": "Utility"
