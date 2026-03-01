@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Download and convert image galleries to CBZ",
-  "author": "David HARPUTOGLU <kasparof57@gmail.com>",
+  "author": "David HARPUTOGLU",
   "repository": {
     "type": "git",
     "url": "https://github.com/davidharputoglu/SnapCBZ.git"
