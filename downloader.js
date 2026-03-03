@@ -218,7 +218,7 @@ export async function startDownload(task, win, settings) {
         // w = .webp, j = .jpg, p = .png, g = .gif
         let gTh = {};
         const htmlContent = $.html();
-        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"]([^'"]+)['"]\)/);
+        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\('([^']+)'\)/);
         if (gThMatch) {
           try {
             gTh = JSON.parse(gThMatch[1]);
