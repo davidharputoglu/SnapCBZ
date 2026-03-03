@@ -173,11 +173,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     addTasks([url], type);
   };
 
-  const addTasks = (urls: string[], type: "cbz" | "images" = "cbz") => {
-    urls.forEach((url) => {
-      const id = Math.random().toString(36).substring(2, 9);
-      
+  const addTasks = async (urls: string[], type: "cbz" | "images" = "cbz") => {
+    for (const url of urls) {
       if (type === "images") {
+        const id = Math.random().toString(36).substring(2, 9);
         // Image Board Mode
         let tag = "unknown_tag";
         const tagMatch = url.match(/tags=([^&]+)/i);
@@ -206,43 +205,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
       } else {
         // CBZ Mode
-        let category = "Misc";
-        const artistMatch = url.match(/\/(?:artist|group|parody|character|tag)\/([^/]+)/i);
-        if (artistMatch) {
-          category = artistMatch[1].replace(/[-_]/g, " ");
-          category = category.replace(/\b\w/g, (c) => c.toUpperCase());
-        } else {
-          const parts = url.split('/').filter(Boolean);
-          if (parts.length > 0) {
-            category = parts[parts.length - 1];
+        
+        // Check if it's an artist/tag page that needs expanding
+        let urlsToProcess = [url];
+        
+        if (ipcRenderer && (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/'))) {
+          try {
+            const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url);
+            if (galleryLinks && galleryLinks.length > 0) {
+              urlsToProcess = galleryLinks;
+            }
+          } catch (e) {
+            console.error("Failed to fetch gallery links", e);
           }
         }
 
-        const currentSettings = settingsRef.current;
-        const configuredLangs = currentSettings.languages || [];
-        const availableLangs = configuredLangs.length > 0 ? configuredLangs.map(l => l.id) : ["other"];
-        const lang = availableLangs[Math.floor(Math.random() * availableLangs.length)];
+        urlsToProcess.forEach(galleryUrl => {
+          const id = Math.random().toString(36).substring(2, 9);
+          let category = "Misc";
+          
+          // Optimistic category extraction for the UI (will be overwritten by the real scraper in Electron)
+          try {
+            const match = galleryUrl.match(/\/(?:artist|group|parody|character|tag|gallery)\/([^/]+)/i);
+            if (match) {
+              category = match[1].replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+            }
+          } catch (e) {}
+          
+          const currentSettings = settingsRef.current;
+          const configuredLangs = currentSettings.languages || [];
+          const availableLangs = configuredLangs.length > 0 ? configuredLangs.map(l => l.id) : ["other"];
+          
+          // Try to detect language from URL or tags (simplified for now)
+          let lang = "other";
+          if (galleryUrl.toLowerCase().includes('french') || galleryUrl.toLowerCase().includes('francais')) {
+            lang = "fr";
+          } else if (galleryUrl.toLowerCase().includes('english')) {
+            lang = "en";
+          } else if (galleryUrl.toLowerCase().includes('turkish')) {
+            lang = "tr";
+          } else {
+            // If we can't detect, use the first available language as fallback
+            lang = availableLangs.includes("other") ? "other" : availableLangs[0];
+          }
 
-        const initialTask: DownloadTask = {
-          id,
-          url,
-          type: "cbz",
-          filename: `Gallery from ${new URL(url).hostname}`,
-          status: "queued",
-          progress: 0,
-          language: lang,
-          category,
-        };
+          const initialTask: DownloadTask = {
+            id,
+            url: galleryUrl,
+            type: "cbz",
+            filename: `Gallery from ${new URL(galleryUrl).hostname}`,
+            status: "queued",
+            progress: 0,
+            language: lang,
+            category,
+          };
 
-        setTasks((prev) => [initialTask, ...prev]);
-        
-        if (ipcRenderer) {
-          ipcRenderer.send("start-download", { task: initialTask, settings: settingsRef.current });
-        } else {
-          simulateProcess(initialTask.id, initialTask.filename, initialTask.language!, initialTask.category!);
-        }
+          setTasks((prev) => [initialTask, ...prev]);
+          
+          if (ipcRenderer) {
+            ipcRenderer.send("start-download", { task: initialTask, settings: settingsRef.current });
+          } else {
+            simulateProcess(initialTask.id, initialTask.filename, initialTask.language!, initialTask.category!);
+          }
+        });
       }
-    });
+    }
   };
 
   const removeTask = (id: string) => {

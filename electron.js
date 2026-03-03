@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
-import { startDownload } from './downloader.js';
+import { startDownload, fetchGalleryLinks } from './downloader.js';
 const { autoUpdater } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
@@ -73,6 +73,15 @@ ipcMain.on('start-download', async (event, { task, settings }) => {
   const win = BrowserWindow.getAllWindows()[0];
   if (win) {
     startDownload(task, win, settings);
+  }
+});
+
+ipcMain.handle('fetch-gallery-links', async (event, url) => {
+  try {
+    return await fetchGalleryLinks(url);
+  } catch (error) {
+    console.error('Failed to fetch gallery links:', error);
+    return [];
   }
 });
 

@@ -15,6 +15,56 @@ const axiosInstance = axios.create({
   }
 });
 
+export async function fetchGalleryLinks(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    const links = [];
+
+    if (hostname.includes('imhentai.xxx')) {
+      // If it's an artist/tag/search page, get all gallery links
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+        const res = await axiosInstance.get(url);
+        const $ = cheerio.load(res.data);
+        $('.thumb a').each((i, el) => {
+          const href = $(el).attr('href');
+          if (href && href.includes('/gallery/')) {
+            links.push(urlObj.origin + href);
+          }
+        });
+      }
+    } else if (hostname.includes('3hentai.net')) {
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+        const res = await axiosInstance.get(url);
+        const $ = cheerio.load(res.data);
+        $('.grid-item a').each((i, el) => {
+          const href = $(el).attr('href');
+          if (href && href.includes('/d/')) {
+            links.push(urlObj.origin + href);
+          }
+        });
+      }
+    } else if (hostname.includes('nhentai.net')) {
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+        const res = await axiosInstance.get(url);
+        const $ = cheerio.load(res.data);
+        $('.gallery a.cover').each((i, el) => {
+          const href = $(el).attr('href');
+          if (href && href.includes('/g/')) {
+            links.push(urlObj.origin + href);
+          }
+        });
+      }
+    }
+
+    // Return unique links
+    return [...new Set(links)];
+  } catch (error) {
+    console.error("Error fetching gallery links:", error.message);
+    return [];
+  }
+}
+
 export async function startDownload(task, win, settings) {
   try {
     const { id, url, type, category, language, copyright, character } = task;
@@ -23,6 +73,8 @@ export async function startDownload(task, win, settings) {
     
     let imageUrls = [];
     let title = 'Gallery';
+    let extractedArtist = category; // Start with what we got from the URL
+    let extractedLanguage = language; // Start with what we got from the URL
     
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
@@ -56,6 +108,21 @@ export async function startDownload(task, win, settings) {
           const galleryId = match[1];
           const apiRes = await axiosInstance.get(`https://nhentai.net/api/gallery/${galleryId}`);
           title = apiRes.data.title.pretty || apiRes.data.title.english;
+          
+          // Extract artist from tags
+          const artistTag = apiRes.data.tags.find(t => t.type === 'artist');
+          if (artistTag) {
+            extractedArtist = artistTag.name.replace(/\b\w/g, c => c.toUpperCase());
+          }
+
+          // Extract language from tags
+          const langTag = apiRes.data.tags.find(t => t.type === 'language' && t.name !== 'translated');
+          if (langTag) {
+             if (langTag.name === 'french') extractedLanguage = 'fr';
+             else if (langTag.name === 'english') extractedLanguage = 'en';
+             else if (langTag.name === 'turkish') extractedLanguage = 'tr';
+          }
+
           const mediaId = apiRes.data.media_id;
           imageUrls = apiRes.data.images.pages.map((p, i) => {
             const ext = p.t === 'p' ? 'png' : (p.t === 'g' ? 'gif' : 'jpg');
@@ -66,6 +133,26 @@ export async function startDownload(task, win, settings) {
         const res = await axiosInstance.get(url);
         const $ = cheerio.load(res.data);
         title = $('title').text().replace(' - 3hentai', '').trim();
+        
+        // Extract artist
+        const artistTags = [];
+        $('.tag-container a[href*="/artist/"]').each((i, el) => {
+          artistTags.push($(el).text().replace(/\([0-9]+\)/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+        });
+        if (artistTags.length > 0) {
+          extractedArtist = artistTags.join(', ');
+        }
+
+        // Extract language
+        const langTags = [];
+        $('.tag-container a[href*="/language/"]').each((i, el) => {
+          langTags.push($(el).text().toLowerCase());
+        });
+        const langText = langTags.join(' ');
+        if (langText.includes('french')) extractedLanguage = 'fr';
+        else if (langText.includes('english')) extractedLanguage = 'en';
+        else if (langText.includes('turkish')) extractedLanguage = 'tr';
+
         $('.page-container img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
@@ -77,6 +164,26 @@ export async function startDownload(task, win, settings) {
         const res = await axiosInstance.get(url);
         const $ = cheerio.load(res.data);
         title = $('h1').text().trim();
+        
+        // Extract artist
+        const artistTags = [];
+        $('.tag-container a[href*="/artist/"]').each((i, el) => {
+          artistTags.push($(el).text().replace(/[0-9,]+$/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+        });
+        if (artistTags.length > 0) {
+          extractedArtist = artistTags.join(', ');
+        }
+
+        // Extract language
+        const langTags = [];
+        $('.tag-container a[href*="/language/"]').each((i, el) => {
+          langTags.push($(el).text().toLowerCase());
+        });
+        const langText = langTags.join(' ');
+        if (langText.includes('french')) extractedLanguage = 'fr';
+        else if (langText.includes('english')) extractedLanguage = 'en';
+        else if (langText.includes('turkish')) extractedLanguage = 'tr';
+
         $('.gthumb img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
@@ -157,8 +264,21 @@ export async function startDownload(task, win, settings) {
       
     } else {
       // CBZ Mode
-      const baseDir = settings.directories[language] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
-      saveDir = path.join(baseDir, category || 'Misc');
+      
+      // Ensure the language matches one of the user's configured languages
+      const configuredLangs = settings.languages || [];
+      const availableLangIds = configuredLangs.map(l => l.id);
+      
+      // If the extracted language is not in the user's configured languages, fallback to 'other' or the first available
+      if (!availableLangIds.includes(extractedLanguage)) {
+        extractedLanguage = availableLangIds.includes('other') ? 'other' : (availableLangIds[0] || 'other');
+      }
+
+      const baseDir = settings.directories[extractedLanguage] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
+      
+      // Clean up the category/artist name for the folder
+      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim();
+      saveDir = path.join(baseDir, cleanCategory);
       await fs.ensureDir(saveDir);
       
       title = title.replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
@@ -168,7 +288,14 @@ export async function startDownload(task, win, settings) {
       const tempDir = path.join(app.getPath('temp'), 'snapcbz', crypto.randomBytes(8).toString('hex'));
       await fs.ensureDir(tempDir);
       
-      win.webContents.send('download-progress', { id, status: 'downloading', progress: 10, filename: `Downloading ${totalImages} images...` });
+      win.webContents.send('download-progress', { 
+        id, 
+        status: 'downloading', 
+        progress: 10, 
+        filename: `Downloading ${totalImages} images...`,
+        category: cleanCategory, // Send back the real artist name to update the UI
+        language: extractedLanguage // Send back the real language to update the UI
+      });
       
       let downloadedCount = 0;
       for (let i = 0; i < uniqueImages.length; i++) {
