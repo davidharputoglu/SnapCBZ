@@ -136,8 +136,8 @@ export async function startDownload(task, win, settings) {
         
         // Extract artist
         const artistTags = [];
-        $('.tag-container a[href*="/artist/"]').each((i, el) => {
-          artistTags.push($(el).text().replace(/\([0-9]+\)/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+        $('a[href*="/artist/"]').each((i, el) => {
+          artistTags.push($(el).text().replace(/\([0-9]+\)/g, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
         });
         if (artistTags.length > 0) {
           extractedArtist = artistTags.join(', ');
@@ -145,7 +145,7 @@ export async function startDownload(task, win, settings) {
 
         // Extract language
         const langTags = [];
-        $('.tag-container a[href*="/language/"]').each((i, el) => {
+        $('a[href*="/language/"]').each((i, el) => {
           langTags.push($(el).text().toLowerCase());
         });
         const langText = langTags.join(' ');
@@ -167,8 +167,8 @@ export async function startDownload(task, win, settings) {
         
         // Extract artist
         const artistTags = [];
-        $('.tag-container a[href*="/artist/"]').each((i, el) => {
-          artistTags.push($(el).text().replace(/[0-9,]+$/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+        $('a[href*="/artist/"]').each((i, el) => {
+          artistTags.push($(el).text().replace(/\([0-9]+\)/g, '').replace(/[0-9,]+$/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
         });
         if (artistTags.length > 0) {
           extractedArtist = artistTags.join(', ');
@@ -176,7 +176,7 @@ export async function startDownload(task, win, settings) {
 
         // Extract language
         const langTags = [];
-        $('.tag-container a[href*="/language/"]').each((i, el) => {
+        $('a[href*="/language/"]').each((i, el) => {
           langTags.push($(el).text().toLowerCase());
         });
         const langText = langTags.join(' ');
@@ -236,7 +236,10 @@ export async function startDownload(task, win, settings) {
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
         try {
-          const imgRes = await axiosInstance.get(imgUrl, { responseType: 'arraybuffer' });
+          const imgRes = await axiosInstance.get(imgUrl, { 
+            responseType: 'arraybuffer',
+            headers: { 'Referer': url }
+          });
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
           const filePath = path.join(saveDir, fileName);
@@ -301,7 +304,10 @@ export async function startDownload(task, win, settings) {
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
         try {
-          const imgRes = await axiosInstance.get(imgUrl, { responseType: 'arraybuffer' });
+          const imgRes = await axiosInstance.get(imgUrl, { 
+            responseType: 'arraybuffer',
+            headers: { 'Referer': url }
+          });
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), imgRes.data);
@@ -314,6 +320,10 @@ export async function startDownload(task, win, settings) {
         } catch (err) {
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         }
+      }
+      
+      if (downloadedCount === 0) {
+        throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
       }
       
       win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: 'Creating CBZ archive...' });

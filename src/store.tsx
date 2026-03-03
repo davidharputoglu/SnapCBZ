@@ -226,7 +226,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           
           // Optimistic category extraction for the UI (will be overwritten by the real scraper in Electron)
           try {
-            const match = galleryUrl.match(/\/(?:artist|group|parody|character|tag|gallery)\/([^/]+)/i);
+            const match = galleryUrl.match(/\/(?:artist|group|parody|character|tag)\/([^/]+)/i);
             if (match) {
               category = match[1].replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
             }
