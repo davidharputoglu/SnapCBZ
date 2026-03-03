@@ -107,28 +107,69 @@ export async function startDownload(task, win, settings) {
         const match = url.match(/\/g\/([0-9]+)/);
         if (match) {
           const galleryId = match[1];
-          const apiRes = await axiosInstance.get(`https://nhentai.net/api/gallery/${galleryId}`);
-          title = apiRes.data.title.pretty || apiRes.data.title.english;
-          
-          // Extract artist from tags
-          const artistTag = apiRes.data.tags.find(t => t.type === 'artist');
-          if (artistTag) {
-            extractedArtist = artistTag.name.replace(/\b\w/g, c => c.toUpperCase());
-          }
+          try {
+            const apiRes = await axiosInstance.get(`https://nhentai.net/api/gallery/${galleryId}`);
+            title = apiRes.data.title.pretty || apiRes.data.title.english;
+            
+            // Extract artist from tags
+            const artistTag = apiRes.data.tags.find(t => t.type === 'artist');
+            if (artistTag) {
+              extractedArtist = artistTag.name.replace(/\b\w/g, c => c.toUpperCase());
+            }
 
-          // Extract language from tags
-          const langTag = apiRes.data.tags.find(t => t.type === 'language' && t.name !== 'translated');
-          if (langTag) {
-             if (langTag.name === 'french') extractedLanguage = 'fr';
-             else if (langTag.name === 'english') extractedLanguage = 'en';
-             else if (langTag.name === 'turkish') extractedLanguage = 'tr';
-          }
+            // Extract language from tags
+            const langTag = apiRes.data.tags.find(t => t.type === 'language' && t.name !== 'translated');
+            if (langTag) {
+               if (langTag.name === 'french') extractedLanguage = 'fr';
+               else if (langTag.name === 'english') extractedLanguage = 'en';
+               else if (langTag.name === 'turkish') extractedLanguage = 'tr';
+               else if (langTag.name === 'spanish') extractedLanguage = 'es';
+               else if (langTag.name === 'japanese') extractedLanguage = 'jp';
+               else if (langTag.name === 'korean') extractedLanguage = 'kr';
+               else if (langTag.name === 'chinese') extractedLanguage = 'cn';
+               else if (langTag.name === 'russian') extractedLanguage = 'ru';
+               else if (langTag.name === 'german') extractedLanguage = 'de';
+               else if (langTag.name === 'italian') extractedLanguage = 'it';
+            }
 
-          const mediaId = apiRes.data.media_id;
-          imageUrls = apiRes.data.images.pages.map((p, i) => {
-            const ext = p.t === 'p' ? 'png' : (p.t === 'g' ? 'gif' : 'jpg');
-            return `https://i.nhentai.net/galleries/${mediaId}/${i + 1}.${ext}`;
-          });
+            const mediaId = apiRes.data.media_id;
+            imageUrls = apiRes.data.images.pages.map((p, i) => {
+              const ext = p.t === 'p' ? 'png' : (p.t === 'g' ? 'gif' : (p.t === 'w' ? 'webp' : 'jpg'));
+              return `https://i.nhentai.net/galleries/${mediaId}/${i + 1}.${ext}`;
+            });
+          } catch (apiError) {
+            console.log("nhentai API failed, falling back to HTML scraping", apiError.message);
+            const res = await axiosInstance.get(url);
+            const $ = cheerio.load(res.data);
+            title = $('#info h1').text().trim() || $('#info h2').text().trim();
+            
+            const artistTags = [];
+            $('.tag-container:contains("Artists") .name, .tags a[href*="/artist/"] .name').each((i, el) => {
+              artistTags.push($(el).text().replace(/\b\w/g, c => c.toUpperCase()));
+            });
+            if (artistTags.length > 0) extractedArtist = artistTags.join(', ');
+
+            const langTags = [];
+            $('.tag-container:contains("Languages") .name, .tags a[href*="/language/"] .name').each((i, el) => {
+              langTags.push($(el).text().toLowerCase());
+            });
+            const langText = langTags.join(' ');
+            if (langText.includes('french')) extractedLanguage = 'fr';
+            else if (langText.includes('english')) extractedLanguage = 'en';
+            else if (langText.includes('spanish')) extractedLanguage = 'es';
+            else if (langText.includes('japanese')) extractedLanguage = 'jp';
+            else if (langText.includes('korean')) extractedLanguage = 'kr';
+            else if (langText.includes('chinese')) extractedLanguage = 'cn';
+            
+            $('.gallerythumb img').each((i, el) => {
+              let src = $(el).attr('data-src') || $(el).attr('src');
+              if (src) {
+                let realSrc = src.replace(/t([0-9]*)\.nhentai\.net/, 'i$1.nhentai.net');
+                realSrc = realSrc.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+                imageUrls.push(realSrc);
+              }
+            });
+          }
         }
       } else if (hostname.includes('3hentai.net')) {
         const res = await axiosInstance.get(url);
@@ -166,10 +207,22 @@ export async function startDownload(task, win, settings) {
         $('.page-container img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
-             src = src.replace('t.3hentai.net', 'cdn.3hentai.net').replace('t.jpg', '.jpg').replace('t.png', '.png');
+             src = src.replace(/t([0-9]*)\.3hentai\.net/, 'cdn.3hentai.net').replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
              imageUrls.push(src);
           }
         });
+        
+        // If it's a gallery page instead of a reading page
+        if (imageUrls.length === 0) {
+          $('.gallery .item img, .container .gallery img').each((i, el) => {
+            let src = $(el).attr('data-src') || $(el).attr('src');
+            if (src) {
+               let realSrc = src.replace(/t([0-9]*)\.3hentai\.net/, 'cdn.3hentai.net');
+               realSrc = realSrc.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+               imageUrls.push(realSrc);
+            }
+          });
+        }
       } else if (hostname.includes('imhentai.xxx')) {
         const res = await axiosInstance.get(url);
         const $ = cheerio.load(res.data);
