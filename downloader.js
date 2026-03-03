@@ -207,7 +207,9 @@ export async function startDownload(task, win, settings) {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
             if (src.startsWith('//')) src = 'https:' + src;
-            src = src.replace('t.jpg', '.jpg').replace('t.png', '.png');
+            // The thumbnail URL is like: https://t.imhentai.xxx/m/12345/1t.jpg
+            // The real image URL is like: https://m.imhentai.xxx/m/12345/1.jpg
+            src = src.replace('t.imhentai.xxx', 'm.imhentai.xxx').replace('t.jpg', '.jpg').replace('t.png', '.png');
             imageUrls.push(src);
           }
         });
@@ -297,11 +299,10 @@ export async function startDownload(task, win, settings) {
         if (availableLangIds.includes('other')) {
           extractedLanguage = 'other';
         } else {
-          // Abort the download completely if the language is not wanted
+          // Abort the download completely and tell the UI to remove the task silently
           win.webContents.send('download-progress', { 
             id, 
-            status: 'error', 
-            error: `Langue ignorée (${extractedLanguage}). Configurez cette langue pour la télécharger.` 
+            status: 'ignored_language'
           });
           return; // Stop execution
         }

@@ -154,9 +154,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!ipcRenderer) return;
 
     const handleProgress = (event: any, data: any) => {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === data.id ? { ...t, ...data } : t))
-      );
+      setTasks((prev) => {
+        // If the language is ignored, remove the task completely from the UI
+        if (data.status === 'ignored_language') {
+          return prev.filter((t) => t.id !== data.id);
+        }
+        
+        return prev.map((t) => (t.id === data.id ? { ...t, ...data } : t));
+      });
     };
 
     ipcRenderer.on("download-progress", handleProgress);
