@@ -7,6 +7,7 @@ import crypto from 'crypto';
 import { app } from 'electron';
 
 const axiosInstance = axios.create({
+  timeout: 15000, // 15 seconds timeout to prevent getting stuck
   headers: {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -137,7 +138,9 @@ export async function startDownload(task, win, settings) {
         // Extract artist
         const artistTags = [];
         $('a[href*="/artist/"]').each((i, el) => {
-          artistTags.push($(el).text().replace(/\([0-9]+\)/g, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+          let text = $(el).clone().children().remove().end().text(); // Remove child spans (like badges)
+          text = text.replace(/[\n\r\t]/g, '').trim().replace(/\b\w/g, c => c.toUpperCase());
+          if (text) artistTags.push(text);
         });
         if (artistTags.length > 0) {
           extractedArtist = artistTags.join(', ');
@@ -149,9 +152,16 @@ export async function startDownload(task, win, settings) {
           langTags.push($(el).text().toLowerCase());
         });
         const langText = langTags.join(' ');
-        if (langText.includes('french')) extractedLanguage = 'fr';
+        if (langText.includes('french') || langText.includes('français')) extractedLanguage = 'fr';
         else if (langText.includes('english')) extractedLanguage = 'en';
-        else if (langText.includes('turkish')) extractedLanguage = 'tr';
+        else if (langText.includes('turkish') || langText.includes('türkçe')) extractedLanguage = 'tr';
+        else if (langText.includes('spanish') || langText.includes('español')) extractedLanguage = 'es';
+        else if (langText.includes('japanese') || langText.includes('日本語')) extractedLanguage = 'jp';
+        else if (langText.includes('korean') || langText.includes('한국어')) extractedLanguage = 'kr';
+        else if (langText.includes('chinese') || langText.includes('中文')) extractedLanguage = 'cn';
+        else if (langText.includes('russian') || langText.includes('русский')) extractedLanguage = 'ru';
+        else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
+        else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
 
         $('.page-container img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
@@ -168,7 +178,9 @@ export async function startDownload(task, win, settings) {
         // Extract artist
         const artistTags = [];
         $('a[href*="/artist/"]').each((i, el) => {
-          artistTags.push($(el).text().replace(/\([0-9]+\)/g, '').replace(/[0-9,]+$/, '').trim().replace(/\b\w/g, c => c.toUpperCase()));
+          let text = $(el).clone().children().remove().end().text(); // Remove child spans (like badges)
+          text = text.replace(/[\n\r\t]/g, '').trim().replace(/\b\w/g, c => c.toUpperCase());
+          if (text) artistTags.push(text);
         });
         if (artistTags.length > 0) {
           extractedArtist = artistTags.join(', ');
@@ -180,13 +192,21 @@ export async function startDownload(task, win, settings) {
           langTags.push($(el).text().toLowerCase());
         });
         const langText = langTags.join(' ');
-        if (langText.includes('french')) extractedLanguage = 'fr';
+        if (langText.includes('french') || langText.includes('français')) extractedLanguage = 'fr';
         else if (langText.includes('english')) extractedLanguage = 'en';
-        else if (langText.includes('turkish')) extractedLanguage = 'tr';
+        else if (langText.includes('turkish') || langText.includes('türkçe')) extractedLanguage = 'tr';
+        else if (langText.includes('spanish') || langText.includes('español')) extractedLanguage = 'es';
+        else if (langText.includes('japanese') || langText.includes('日本語')) extractedLanguage = 'jp';
+        else if (langText.includes('korean') || langText.includes('한국어')) extractedLanguage = 'kr';
+        else if (langText.includes('chinese') || langText.includes('中文')) extractedLanguage = 'cn';
+        else if (langText.includes('russian') || langText.includes('русский')) extractedLanguage = 'ru';
+        else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
+        else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
 
         $('.gthumb img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
+            if (src.startsWith('//')) src = 'https:' + src;
             src = src.replace('t.jpg', '.jpg').replace('t.png', '.png');
             imageUrls.push(src);
           }
@@ -272,15 +292,25 @@ export async function startDownload(task, win, settings) {
       const configuredLangs = settings.languages || [];
       const availableLangIds = configuredLangs.map(l => l.id);
       
-      // If the extracted language is not in the user's configured languages, fallback to 'other' or the first available
+      // If the extracted language is not in the user's configured languages
       if (!availableLangIds.includes(extractedLanguage)) {
-        extractedLanguage = availableLangIds.includes('other') ? 'other' : (availableLangIds[0] || 'other');
+        if (availableLangIds.includes('other')) {
+          extractedLanguage = 'other';
+        } else {
+          // Abort the download completely if the language is not wanted
+          win.webContents.send('download-progress', { 
+            id, 
+            status: 'error', 
+            error: `Langue ignorée (${extractedLanguage}). Configurez cette langue pour la télécharger.` 
+          });
+          return; // Stop execution
+        }
       }
 
       const baseDir = settings.directories[extractedLanguage] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
       
-      // Clean up the category/artist name for the folder
-      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim();
+      // Clean up the category/artist name for the folder (replace spaces with hyphens)
+      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/\s+/g, '-');
       saveDir = path.join(baseDir, cleanCategory);
       await fs.ensureDir(saveDir);
       
@@ -315,10 +345,15 @@ export async function startDownload(task, win, settings) {
           
           win.webContents.send('download-progress', { 
             id, 
-            progress: 10 + ((downloadedCount / totalImages) * 60)
+            progress: 10 + (((i + 1) / totalImages) * 60)
           });
         } catch (err) {
           console.error(`Failed to download image ${imgUrl}:`, err.message);
+          // Still update progress so the bar doesn't get stuck
+          win.webContents.send('download-progress', { 
+            id, 
+            progress: 10 + (((i + 1) / totalImages) * 60)
+          });
         }
       }
       

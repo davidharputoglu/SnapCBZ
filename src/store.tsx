@@ -228,7 +228,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           try {
             const match = galleryUrl.match(/\/(?:artist|group|parody|character|tag)\/([^/]+)/i);
             if (match) {
-              category = match[1].replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              category = decodeURIComponent(match[1]).replace(/[-_ ]+/g, "-").replace(/\b\w/g, c => c.toUpperCase());
             }
           } catch (e) {}
           
