@@ -203,14 +203,28 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
 
+        // Extract image server and extension from the gallery page
+        let imageServer = 'm1';
+        let imageExt = '.jpg';
+        const scriptContent = $('script').text();
+        const serverMatch = scriptContent.match(/var\s+server\s*=\s*['"]([^'"]+)['"]/);
+        if (serverMatch) imageServer = serverMatch[1];
+        
+        const dirMatch = scriptContent.match(/var\s+dir\s*=\s*['"]([^'"]+)['"]/);
+        const dir = dirMatch ? dirMatch[1] : '';
+
+        // Try to find the extension from the first thumbnail
+        const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
+        if (firstThumb && firstThumb.includes('.png')) imageExt = '.png';
+
         $('.gthumb img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
-            if (src.startsWith('//')) src = 'https:' + src;
-            // The thumbnail URL is like: https://t.imhentai.xxx/m/12345/1t.jpg
-            // The real image URL is like: https://m.imhentai.xxx/m/12345/1.jpg
-            src = src.replace('t.imhentai.xxx', 'm.imhentai.xxx').replace('t.jpg', '.jpg').replace('t.png', '.png');
-            imageUrls.push(src);
+            // The real image URL is constructed using the server, dir, and page number
+            // Example: https://m1.imhentai.xxx/m/12345/1.jpg
+            const pageNum = i + 1;
+            const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
+            imageUrls.push(realSrc);
           }
         });
       }
