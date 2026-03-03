@@ -210,7 +210,8 @@ export async function startDownload(task, win, settings) {
         const serverMatch = scriptContent.match(/var\s+server\s*=\s*['"]([^'"]+)['"]/);
         if (serverMatch) imageServer = serverMatch[1];
         
-        const dirMatch = scriptContent.match(/var\s+dir\s*=\s*['"]([^'"]+)['"]/);
+        // The directory is actually stored in load_dir, not dir
+        const dirMatch = scriptContent.match(/var\s+load_dir\s*=\s*['"]([^'"]+)['"]/);
         const dir = dirMatch ? dirMatch[1] : '';
 
         // Try to find the extension from the first thumbnail
@@ -220,7 +221,7 @@ export async function startDownload(task, win, settings) {
         $('.gthumb img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
-            // The real image URL is constructed using the server, dir, and page number
+            // The real image URL is constructed using the server, load_dir, and page number
             // Example: https://m1.imhentai.xxx/m/12345/1.jpg
             const pageNum = i + 1;
             const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
