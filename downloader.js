@@ -227,31 +227,32 @@ export async function startDownload(task, win, settings) {
           }
         }
 
-        $('.gthumb img').each((i, el) => {
-          let src = $(el).attr('data-src') || $(el).attr('src');
-          if (src) {
-            const pageNum = i + 1;
+        const totalPages = Object.keys(gTh).length;
+        if (totalPages > 0) {
+          for (let i = 1; i <= totalPages; i++) {
+            const extCode = gTh[i] ? gTh[i].split(',')[0] : 'j';
+            let imageExt = '.jpg';
+            if (extCode === 'w') imageExt = '.webp';
+            else if (extCode === 'p') imageExt = '.png';
+            else if (extCode === 'g') imageExt = '.gif';
             
-            // Determine extension from g_th
-            let imageExt = '.jpg'; // default
-            if (gTh[pageNum]) {
-              const extCode = gTh[pageNum].split(',')[0];
-              if (extCode === 'w') imageExt = '.webp';
-              else if (extCode === 'p') imageExt = '.png';
-              else if (extCode === 'g') imageExt = '.gif';
-              else if (extCode === 'j') imageExt = '.jpg';
-            } else {
-              // Fallback to checking the thumbnail extension
-              if (src.includes('.png')) imageExt = '.png';
-              else if (src.includes('.webp')) imageExt = '.webp';
-            }
-
-            // The real image URL is constructed using the server, load_dir, page number, and correct extension
-            // Example: https://m10.imhentai.xxx/029/85nl14c70e/1.webp
-            const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
+            const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${i}${imageExt}`;
             imageUrls.push(realSrc);
           }
-        });
+        } else {
+          $('.gthumb img').each((i, el) => {
+            let src = $(el).attr('data-src') || $(el).attr('src');
+            if (src) {
+              const pageNum = i + 1;
+              let imageExt = '.jpg';
+              if (src.includes('.png')) imageExt = '.png';
+              else if (src.includes('.webp')) imageExt = '.webp';
+              
+              const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
+              imageUrls.push(realSrc);
+            }
+          });
+        }
       }
     } catch (scrapeError) {
       console.error("Scraping specific error:", scrapeError.message);
@@ -297,10 +298,16 @@ export async function startDownload(task, win, settings) {
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
+          
           const imgRes = await axiosInstance.get(imgUrl, { 
             responseType: 'arraybuffer',
-            headers: { 'Referer': url }
+            headers: { 'Referer': url },
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
+          
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
           const filePath = path.join(saveDir, fileName);
@@ -374,10 +381,16 @@ export async function startDownload(task, win, settings) {
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
         try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
+          
           const imgRes = await axiosInstance.get(imgUrl, { 
             responseType: 'arraybuffer',
-            headers: { 'Referer': url }
+            headers: { 'Referer': url },
+            signal: controller.signal
           });
+          clearTimeout(timeoutId);
+          
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), imgRes.data);
