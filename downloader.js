@@ -203,15 +203,15 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
 
-        // Extract image server and directory from the gallery page
-        let imageServer = 'm1';
-        const scriptContent = $('script').text();
-        const serverMatch = scriptContent.match(/var\s+server\s*=\s*['"]([^'"]+)['"]/);
-        if (serverMatch) imageServer = serverMatch[1];
-        
-        // The directory is actually stored in load_dir, not dir
-        const dirMatch = scriptContent.match(/var\s+load_dir\s*=\s*['"]([^'"]+)['"]/);
-        const dir = dirMatch ? dirMatch[1] : '';
+        // Extract base URL from the first thumbnail
+        const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
+        let baseUrl = '';
+        if (firstThumb) {
+          const baseUrlMatch = firstThumb.match(/(https:\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t\.[a-z]+$/i);
+          if (baseUrlMatch) {
+            baseUrl = baseUrlMatch[1];
+          }
+        }
 
         // Extract the g_th JSON which contains the extensions for each page
         // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
@@ -228,7 +228,7 @@ export async function startDownload(task, win, settings) {
         }
 
         const totalPages = Object.keys(gTh).length;
-        if (totalPages > 0) {
+        if (totalPages > 0 && baseUrl) {
           for (let i = 1; i <= totalPages; i++) {
             const extCode = gTh[i] ? gTh[i].split(',')[0] : 'j';
             let imageExt = '.jpg';
@@ -236,19 +236,17 @@ export async function startDownload(task, win, settings) {
             else if (extCode === 'p') imageExt = '.png';
             else if (extCode === 'g') imageExt = '.gif';
             
-            const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${i}${imageExt}`;
+            const realSrc = `${baseUrl}/${i}${imageExt}`;
             imageUrls.push(realSrc);
           }
         } else {
+          // Fallback if g_th or baseUrl fails
           $('.gthumb img').each((i, el) => {
             let src = $(el).attr('data-src') || $(el).attr('src');
             if (src) {
-              const pageNum = i + 1;
-              let imageExt = '.jpg';
-              if (src.includes('.png')) imageExt = '.png';
-              else if (src.includes('.webp')) imageExt = '.webp';
-              
-              const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
+              // Convert thumbnail URL to full image URL
+              // Example: https://m10.imhentai.xxx/029/85nl14c70e/1t.jpg -> https://m10.imhentai.xxx/029/85nl14c70e/1.jpg
+              const realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
               imageUrls.push(realSrc);
             }
           });
@@ -416,26 +414,26 @@ export async function startDownload(task, win, settings) {
       
       win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: 'Creating CBZ archive...' });
       
-      await new Promise((resolve, reject) => {
-        const output = fs.createWriteStream(finalPath);
-        const archive = archiver('zip', { zlib: { level: 9 } });
-        
-        output.on('close', resolve);
-        output.on('error', reject);
-        archive.on('error', reject);
-        
-        archive.pipe(output);
-        archive.directory(tempDir, false);
-        archive.finalize().catch(reject);
+      const output = fs.createWriteStream(finalPath);
+      const archive = archiver('zip', { zlib: { level: 9 } });
+      
+      output.on('close', async () => {
+        await fs.remove(tempDir);
+        win.webContents.send('download-progress', { 
+          id, 
+          status: 'completed', 
+          progress: 100, 
+          finalPath: finalPath 
+        });
       });
       
-      await fs.remove(tempDir);
-      win.webContents.send('download-progress', { 
-        id, 
-        status: 'completed', 
-        progress: 100, 
-        finalPath: finalPath 
+      archive.on('error', (err) => {
+        throw err;
       });
+      
+      archive.pipe(output);
+      archive.directory(tempDir, false);
+      await archive.finalize();
     }
     
   } catch (error) {
