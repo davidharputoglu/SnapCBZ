@@ -416,26 +416,26 @@ export async function startDownload(task, win, settings) {
       
       win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: 'Creating CBZ archive...' });
       
-      const output = fs.createWriteStream(finalPath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
-      
-      output.on('close', async () => {
-        await fs.remove(tempDir);
-        win.webContents.send('download-progress', { 
-          id, 
-          status: 'completed', 
-          progress: 100, 
-          finalPath: finalPath 
-        });
+      await new Promise((resolve, reject) => {
+        const output = fs.createWriteStream(finalPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+        
+        output.on('close', resolve);
+        output.on('error', reject);
+        archive.on('error', reject);
+        
+        archive.pipe(output);
+        archive.directory(tempDir, false);
+        archive.finalize().catch(reject);
       });
       
-      archive.on('error', (err) => {
-        throw err;
+      await fs.remove(tempDir);
+      win.webContents.send('download-progress', { 
+        id, 
+        status: 'completed', 
+        progress: 100, 
+        finalPath: finalPath 
       });
-      
-      archive.pipe(output);
-      archive.directory(tempDir, false);
-      await archive.finalize();
     }
     
   } catch (error) {
