@@ -203,9 +203,8 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
 
-        // Extract image server and extension from the gallery page
+        // Extract image server and directory from the gallery page
         let imageServer = 'm1';
-        let imageExt = '.jpg';
         const scriptContent = $('script').text();
         const serverMatch = scriptContent.match(/var\s+server\s*=\s*['"]([^'"]+)['"]/);
         if (serverMatch) imageServer = serverMatch[1];
@@ -214,16 +213,41 @@ export async function startDownload(task, win, settings) {
         const dirMatch = scriptContent.match(/var\s+load_dir\s*=\s*['"]([^'"]+)['"]/);
         const dir = dirMatch ? dirMatch[1] : '';
 
-        // Try to find the extension from the first thumbnail
-        const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
-        if (firstThumb && firstThumb.includes('.png')) imageExt = '.png';
+        // Extract the g_th JSON which contains the extensions for each page
+        // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
+        // w = .webp, j = .jpg, p = .png, g = .gif
+        let gTh = {};
+        const htmlContent = $.html();
+        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"]([^'"]+)['"]\)/);
+        if (gThMatch) {
+          try {
+            gTh = JSON.parse(gThMatch[1]);
+          } catch (e) {
+            console.error("Failed to parse g_th JSON", e);
+          }
+        }
 
         $('.gthumb img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
           if (src) {
-            // The real image URL is constructed using the server, load_dir, and page number
-            // Example: https://m1.imhentai.xxx/m/12345/1.jpg
             const pageNum = i + 1;
+            
+            // Determine extension from g_th
+            let imageExt = '.jpg'; // default
+            if (gTh[pageNum]) {
+              const extCode = gTh[pageNum].split(',')[0];
+              if (extCode === 'w') imageExt = '.webp';
+              else if (extCode === 'p') imageExt = '.png';
+              else if (extCode === 'g') imageExt = '.gif';
+              else if (extCode === 'j') imageExt = '.jpg';
+            } else {
+              // Fallback to checking the thumbnail extension
+              if (src.includes('.png')) imageExt = '.png';
+              else if (src.includes('.webp')) imageExt = '.webp';
+            }
+
+            // The real image URL is constructed using the server, load_dir, page number, and correct extension
+            // Example: https://m10.imhentai.xxx/029/85nl14c70e/1.webp
             const realSrc = `https://${imageServer}.imhentai.xxx/m/${dir}/${pageNum}${imageExt}`;
             imageUrls.push(realSrc);
           }
