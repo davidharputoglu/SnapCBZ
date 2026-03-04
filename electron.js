@@ -69,10 +69,29 @@ ipcMain.on('restart_app', () => {
   autoUpdater.quitAndInstall();
 });
 
+const downloadQueue = [];
+let isDownloading = false;
+
+async function processQueue() {
+  if (isDownloading || downloadQueue.length === 0) return;
+  isDownloading = true;
+  
+  const { task, win, settings } = downloadQueue.shift();
+  try {
+    await startDownload(task, win, settings);
+  } catch (e) {
+    console.error("Queue process error:", e);
+  }
+  
+  isDownloading = false;
+  processQueue();
+}
+
 ipcMain.on('start-download', async (event, { task, settings }) => {
-  const win = BrowserWindow.getAllWindows()[0];
+  const win = BrowserWindow.fromWebContents(event.sender);
   if (win) {
-    startDownload(task, win, settings);
+    downloadQueue.push({ task, win, settings });
+    processQueue();
   }
 });
 

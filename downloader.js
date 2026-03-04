@@ -568,23 +568,31 @@ export async function startDownload(task, win, settings) {
       const output = fs.createWriteStream(finalPath);
       const archive = archiver('zip', { zlib: { level: 9 } });
       
-      output.on('close', async () => {
-        await fs.remove(tempDir);
-        win.webContents.send('download-progress', { 
-          id, 
-          status: 'completed', 
-          progress: 100, 
-          finalPath: finalPath 
+      await new Promise((resolve, reject) => {
+        output.on('close', async () => {
+          try {
+            await fs.remove(tempDir);
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'completed', 
+              progress: 100, 
+              filename: finalFilename,
+              finalPath: finalPath 
+            });
+            resolve();
+          } catch (e) {
+            reject(e);
+          }
         });
+        
+        archive.on('error', (err) => {
+          reject(err);
+        });
+        
+        archive.pipe(output);
+        archive.directory(tempDir, false);
+        archive.finalize();
       });
-      
-      archive.on('error', (err) => {
-        throw err;
-      });
-      
-      archive.pipe(output);
-      archive.directory(tempDir, false);
-      await archive.finalize();
     }
     
   } catch (error) {
