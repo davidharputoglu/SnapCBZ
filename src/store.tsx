@@ -242,16 +242,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           const availableLangs = configuredLangs.length > 0 ? configuredLangs.map(l => l.id) : ["other"];
           
           // Try to detect language from URL or tags (simplified for now)
-          let lang = "other";
+          let lang = undefined;
           if (galleryUrl.toLowerCase().includes('french') || galleryUrl.toLowerCase().includes('francais')) {
             lang = "fr";
           } else if (galleryUrl.toLowerCase().includes('english')) {
             lang = "en";
           } else if (galleryUrl.toLowerCase().includes('turkish')) {
             lang = "tr";
-          } else {
-            // If we can't detect, use the first available language as fallback
-            lang = availableLangs.includes("other") ? "other" : availableLangs[0];
           }
 
           const initialTask: DownloadTask = {

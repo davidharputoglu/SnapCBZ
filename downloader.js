@@ -4,7 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import archiver from 'archiver';
 import crypto from 'crypto';
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
 
 const axiosInstance = axios.create({
   timeout: 15000, // 15 seconds timeout to prevent getting stuck
@@ -15,6 +15,81 @@ const axiosInstance = axios.create({
     'Referer': 'https://google.com/'
   }
 });
+
+async function fetchHtmlWithElectron(url) {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true
+      }
+    });
+
+    let resolved = false;
+    let cloudflareTime = 0;
+
+    const timeout = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        win.destroy();
+        reject(new Error("Timeout waiting for Cloudflare bypass"));
+      }
+    }, 45000); // Increased to 45s to give user time to solve captcha
+
+    const checkPage = async () => {
+      if (resolved) return;
+      try {
+        const title = await win.webContents.executeJavaScript('document.title');
+        if (title.includes('Just a moment') || title.includes('Cloudflare')) {
+          cloudflareTime += 1;
+          if (cloudflareTime > 5 && !win.isVisible()) {
+            // Show window so user can solve captcha
+            win.show();
+            win.setTitle("Veuillez résoudre le captcha Cloudflare pour continuer...");
+          }
+          // Still on Cloudflare challenge, check again in 1 second
+          setTimeout(checkPage, 1000);
+          return;
+        }
+        
+        const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeout);
+          win.destroy();
+          resolve(html);
+        }
+      } catch (e) {
+        // Ignore errors during execution, try again
+        if (!resolved) setTimeout(checkPage, 1000);
+      }
+    };
+
+    win.on('closed', () => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
+      }
+    });
+
+    win.webContents.on('did-finish-load', checkPage);
+
+    win.loadURL(url, {
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }).catch(e => {
+      if (!resolved) {
+        resolved = true;
+        clearTimeout(timeout);
+        win.destroy();
+        reject(e);
+      }
+    });
+  });
+}
 
 export async function fetchGalleryLinks(url) {
   try {
@@ -47,8 +122,8 @@ export async function fetchGalleryLinks(url) {
       }
     } else if (hostname.includes('nhentai.net')) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
-        const res = await axiosInstance.get(url);
-        const $ = cheerio.load(res.data);
+        const html = await fetchHtmlWithElectron(url);
+        const $ = cheerio.load(html);
         $('.gallery a.cover').each((i, el) => {
           const href = $(el).attr('href');
           if (href && href.includes('/g/')) {
@@ -108,67 +183,83 @@ export async function startDownload(task, win, settings) {
         if (match) {
           const galleryId = match[1];
           try {
-            const apiRes = await axiosInstance.get(`https://nhentai.net/api/gallery/${galleryId}`);
-            title = apiRes.data.title.pretty || apiRes.data.title.english;
+            const html = await fetchHtmlWithElectron(url);
+            const $ = cheerio.load(html);
             
-            // Extract artist from tags
-            const artistTag = apiRes.data.tags.find(t => t.type === 'artist');
-            if (artistTag) {
-              extractedArtist = artistTag.name.replace(/\b\w/g, c => c.toUpperCase());
-            }
-
-            // Extract language from tags
-            const langTag = apiRes.data.tags.find(t => t.type === 'language' && t.name !== 'translated');
-            if (langTag) {
-               if (langTag.name === 'french') extractedLanguage = 'fr';
-               else if (langTag.name === 'english') extractedLanguage = 'en';
-               else if (langTag.name === 'turkish') extractedLanguage = 'tr';
-               else if (langTag.name === 'spanish') extractedLanguage = 'es';
-               else if (langTag.name === 'japanese') extractedLanguage = 'jp';
-               else if (langTag.name === 'korean') extractedLanguage = 'kr';
-               else if (langTag.name === 'chinese') extractedLanguage = 'cn';
-               else if (langTag.name === 'russian') extractedLanguage = 'ru';
-               else if (langTag.name === 'german') extractedLanguage = 'de';
-               else if (langTag.name === 'italian') extractedLanguage = 'it';
-            }
-
-            const mediaId = apiRes.data.media_id;
-            imageUrls = apiRes.data.images.pages.map((p, i) => {
-              const ext = p.t === 'p' ? 'png' : (p.t === 'g' ? 'gif' : (p.t === 'w' ? 'webp' : 'jpg'));
-              return `https://i.nhentai.net/galleries/${mediaId}/${i + 1}.${ext}`;
-            });
-          } catch (apiError) {
-            console.log("nhentai API failed, falling back to HTML scraping", apiError.message);
-            const res = await axiosInstance.get(url);
-            const $ = cheerio.load(res.data);
-            title = $('#info h1').text().trim() || $('#info h2').text().trim();
-            
-            const artistTags = [];
-            $('.tag-container:contains("Artists") .name, .tags a[href*="/artist/"] .name').each((i, el) => {
-              artistTags.push($(el).text().replace(/\b\w/g, c => c.toUpperCase()));
-            });
-            if (artistTags.length > 0) extractedArtist = artistTags.join(', ');
-
-            const langTags = [];
-            $('.tag-container:contains("Languages") .name, .tags a[href*="/language/"] .name').each((i, el) => {
-              langTags.push($(el).text().toLowerCase());
-            });
-            const langText = langTags.join(' ');
-            if (langText.includes('french')) extractedLanguage = 'fr';
-            else if (langText.includes('english')) extractedLanguage = 'en';
-            else if (langText.includes('spanish')) extractedLanguage = 'es';
-            else if (langText.includes('japanese')) extractedLanguage = 'jp';
-            else if (langText.includes('korean')) extractedLanguage = 'kr';
-            else if (langText.includes('chinese')) extractedLanguage = 'cn';
-            
-            $('.gallerythumb img').each((i, el) => {
-              let src = $(el).attr('data-src') || $(el).attr('src');
-              if (src) {
-                let realSrc = src.replace(/t([0-9]*)\.nhentai\.net/, 'i$1.nhentai.net');
-                realSrc = realSrc.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
-                imageUrls.push(realSrc);
+            let galleryData = null;
+            $('script').each((i, el) => {
+              const text = $(el).html();
+              if (text && text.includes('window._gallery')) {
+                const match = text.match(/window\._gallery\s*=\s*JSON\.parse\((.*)\);/);
+                if (match) {
+                  try {
+                    galleryData = JSON.parse(JSON.parse(match[1]));
+                  } catch(e) {}
+                }
               }
             });
+
+            if (galleryData) {
+              title = galleryData.title.pretty || galleryData.title.english;
+              
+              const artistTag = galleryData.tags.find(t => t.type === 'artist');
+              if (artistTag) {
+                extractedArtist = artistTag.name.replace(/\b\w/g, c => c.toUpperCase());
+              }
+
+              const langTag = galleryData.tags.find(t => t.type === 'language' && t.name !== 'translated');
+              if (langTag) {
+                 if (langTag.name === 'french') extractedLanguage = 'fr';
+                 else if (langTag.name === 'english') extractedLanguage = 'en';
+                 else if (langTag.name === 'turkish') extractedLanguage = 'tr';
+                 else if (langTag.name === 'spanish') extractedLanguage = 'es';
+                 else if (langTag.name === 'japanese') extractedLanguage = 'jp';
+                 else if (langTag.name === 'korean') extractedLanguage = 'kr';
+                 else if (langTag.name === 'chinese') extractedLanguage = 'cn';
+                 else if (langTag.name === 'russian') extractedLanguage = 'ru';
+                 else if (langTag.name === 'german') extractedLanguage = 'de';
+                 else if (langTag.name === 'italian') extractedLanguage = 'it';
+              }
+
+              const mediaId = galleryData.media_id;
+              imageUrls = galleryData.images.pages.map((p, i) => {
+                const ext = p.t === 'p' ? 'png' : (p.t === 'g' ? 'gif' : (p.t === 'w' ? 'webp' : 'jpg'));
+                return `https://i.nhentai.net/galleries/${mediaId}/${i + 1}.${ext}`;
+              });
+            } else {
+              // Fallback to HTML scraping
+              title = $('#info h1').text().trim() || $('#info h2').text().trim();
+              
+              const artistTags = [];
+              $('.tag-container:contains("Artists") .name, .tags a[href*="/artist/"] .name').each((i, el) => {
+                artistTags.push($(el).text().replace(/\b\w/g, c => c.toUpperCase()));
+              });
+              if (artistTags.length > 0) extractedArtist = artistTags.join(', ');
+
+              const langTags = [];
+              $('.tag-container:contains("Languages") .name, .tags a[href*="/language/"] .name').each((i, el) => {
+                langTags.push($(el).text().toLowerCase());
+              });
+              const langText = langTags.join(' ');
+              if (langText.includes('french')) extractedLanguage = 'fr';
+              else if (langText.includes('english')) extractedLanguage = 'en';
+              else if (langText.includes('spanish')) extractedLanguage = 'es';
+              else if (langText.includes('japanese')) extractedLanguage = 'jp';
+              else if (langText.includes('korean')) extractedLanguage = 'kr';
+              else if (langText.includes('chinese')) extractedLanguage = 'cn';
+              
+              $('.gallerythumb img').each((i, el) => {
+                let src = $(el).attr('data-src') || $(el).attr('src');
+                if (src) {
+                  let realSrc = src.replace(/t([0-9]*)\.nhentai\.net/, 'i$1.nhentai.net');
+                  realSrc = realSrc.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+                  imageUrls.push(realSrc);
+                }
+              });
+            }
+          } catch (apiError) {
+            console.error("nhentai scraping failed:", apiError.message);
+            throw new Error(`Erreur lors de l'analyse de nhentai.net: ${apiError.message}`);
           }
         }
       } else if (hostname.includes('3hentai.net')) {
@@ -314,8 +405,15 @@ export async function startDownload(task, win, settings) {
 
     // Generic fallback
     if (imageUrls.length === 0) {
-      const response = await axiosInstance.get(url);
-      const $ = cheerio.load(response.data);
+      let html = '';
+      if (hostname.includes('nhentai.net')) {
+        html = await fetchHtmlWithElectron(url);
+      } else {
+        const response = await axiosInstance.get(url);
+        html = response.data;
+      }
+      
+      const $ = cheerio.load(html);
       title = $('title').text().replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
       
       $('img').each((i, el) => {
