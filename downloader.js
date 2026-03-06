@@ -91,6 +91,23 @@ async function fetchHtmlWithElectron(url) {
   });
 }
 
+// Helper function to fetch with a strict timeout to prevent hanging
+async function safeGet(url, config = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
+  try {
+    const res = await axiosInstance.get(url, {
+      ...config,
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    return res;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
 export async function fetchGalleryLinks(url) {
   try {
     const urlObj = new URL(url);
@@ -103,7 +120,7 @@ export async function fetchGalleryLinks(url) {
         let currentUrl = url;
         let pagesFetched = 0;
         while (currentUrl && pagesFetched < 50) {
-          const res = await axiosInstance.get(currentUrl);
+          const res = await safeGet(currentUrl);
           const $ = cheerio.load(res.data);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -128,7 +145,7 @@ export async function fetchGalleryLinks(url) {
         let currentUrl = url;
         let pagesFetched = 0;
         while (currentUrl && pagesFetched < 50) {
-          const res = await axiosInstance.get(currentUrl);
+          const res = await safeGet(currentUrl);
           const $ = cheerio.load(res.data);
           let found = 0;
           $('.grid-item a').each((i, el) => {
@@ -200,18 +217,18 @@ export async function startDownload(task, win, settings) {
     try {
       if (hostname.includes('rule34.xxx')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await axiosInstance.get(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
+        const apiRes = await safeGet(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
         if (apiRes.data && Array.isArray(apiRes.data)) {
           imageUrls = apiRes.data.map(p => p.file_url);
         }
       } else if (hostname.includes('gelbooru.com')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await axiosInstance.get(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
+        const apiRes = await safeGet(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
         if (apiRes.data && apiRes.data.post) {
           imageUrls = apiRes.data.post.map(p => p.file_url);
         }
       } else if (hostname.includes('rule34.paheal.net')) {
-        const res = await axiosInstance.get(url);
+        const res = await safeGet(url);
         const $ = cheerio.load(res.data);
         $('.shm-thumb').each((i, el) => {
           let src = $(el).find('img').attr('src');
@@ -305,7 +322,7 @@ export async function startDownload(task, win, settings) {
           }
         }
       } else if (hostname.includes('3hentai.net')) {
-        const res = await axiosInstance.get(url);
+        const res = await safeGet(url);
         const $ = cheerio.load(res.data);
         title = $('title').text().replace(' - 3hentai', '').trim();
         
@@ -357,7 +374,7 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
-        const res = await axiosInstance.get(url);
+        const res = await safeGet(url);
         const $ = cheerio.load(res.data);
         title = $('h1').text().trim();
         
@@ -462,7 +479,7 @@ export async function startDownload(task, win, settings) {
       if (hostname.includes('nhentai.net')) {
         html = await fetchHtmlWithElectron(url);
       } else {
-        const response = await axiosInstance.get(url);
+        const response = await safeGet(url);
         html = response.data;
       }
       
