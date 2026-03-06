@@ -404,4 +404,3 @@ export const useAppStore = () => {
   if (!context) throw new Error("useAppStore must be used within AppProvider");
   return context;
 };
-

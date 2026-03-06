@@ -272,4 +272,3 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
     </div>
   );
 };
-
