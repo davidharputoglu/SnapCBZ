@@ -106,7 +106,7 @@ export async function fetchGalleryLinks(url) {
           const res = await axiosInstance.get(currentUrl);
           const $ = cheerio.load(res.data);
           let found = 0;
-          $('.thumb a').each((i, el) => {
+          $('.thumb a, .inner_thumb a').each((i, el) => {
             const href = $(el).attr('href');
             if (href && href.includes('/gallery/')) {
               links.push(urlObj.origin + href);
@@ -436,6 +436,17 @@ export async function startDownload(task, win, settings) {
               imageUrls.push(realSrc);
             }
           });
+          
+          // If still no images, try to find them in the gallery container
+          if (imageUrls.length === 0) {
+            $('.gallery_content img').each((i, el) => {
+              let src = $(el).attr('data-src') || $(el).attr('src');
+              if (src) {
+                const realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+                imageUrls.push(realSrc);
+              }
+            });
+          }
         }
       }
     } catch (scrapeError) {
