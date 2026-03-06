@@ -97,7 +97,7 @@ export const DownloadView: React.FC = () => {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-xl font-semibold text-foreground">{t("dl_active_tasks")}</h2>
         {tasks.some(
-          (t) => t.status === "completed" || t.status === "error",
+          (t) => t.status === "completed" || t.status === "error" || t.status === "ignored",
         ) && (
           <button
             onClick={clearCompleted}
@@ -143,6 +143,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
       case "completed":
         return <CheckCircle2 className="w-6 h-6 text-emerald-500" />;
       case "error":
+      case "ignored":
         return <AlertCircle className="w-6 h-6 text-red-500" />;
       case "scraping":
         return <Globe2 className="w-6 h-6 text-primary animate-pulse" />;
@@ -169,6 +170,8 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
         return t("status_completed");
       case "error":
         return t("status_error");
+      case "ignored":
+        return "Ignoré";
     }
   };
 
@@ -244,7 +247,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
         <div className="h-2 w-full bg-muted rounded-full overflow-hidden">
           <div
             className={`h-full transition-all duration-500 ease-out ${
-              task.status === "error"
+              task.status === "error" || task.status === "ignored"
                 ? "bg-red-500"
                 : task.status === "completed"
                   ? "bg-emerald-500"
@@ -260,7 +263,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
           </div>
         )}
 
-        {task.status === "error" && task.error && (
+        {(task.status === "error" || task.status === "ignored") && task.error && (
           <div className="text-xs text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded-lg">
             {task.error}
           </div>

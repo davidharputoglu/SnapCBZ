@@ -70,21 +70,23 @@ ipcMain.on('restart_app', () => {
 });
 
 const downloadQueue = [];
-let isDownloading = false;
+const MAX_CONCURRENT = 3;
+let activeDownloads = 0;
 
-async function processQueue() {
-  if (isDownloading || downloadQueue.length === 0) return;
-  isDownloading = true;
+function processQueue() {
+  if (activeDownloads >= MAX_CONCURRENT || downloadQueue.length === 0) return;
   
-  const { task, win, settings } = downloadQueue.shift();
-  try {
-    await startDownload(task, win, settings);
-  } catch (e) {
-    console.error("Queue process error:", e);
+  while (activeDownloads < MAX_CONCURRENT && downloadQueue.length > 0) {
+    activeDownloads++;
+    const { task, win, settings } = downloadQueue.shift();
+    
+    startDownload(task, win, settings)
+      .catch(e => console.error("Queue process error:", e))
+      .finally(() => {
+        activeDownloads--;
+        processQueue();
+      });
   }
-  
-  isDownloading = false;
-  processQueue();
 }
 
 ipcMain.on('start-download', async (event, { task, settings }) => {

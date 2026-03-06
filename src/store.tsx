@@ -37,7 +37,8 @@ export interface DownloadTask {
     | "extracting"
     | "converting"
     | "completed"
-    | "error";
+    | "error"
+    | "ignored";
   progress: number;
   language?: string;
   category?: string;
@@ -155,9 +156,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const handleProgress = (event: any, data: any) => {
       setTasks((prev) => {
-        // If the language is ignored, remove the task completely from the UI
+        // If the language is ignored, mark it as ignored so the user understands why it was skipped
         if (data.status === 'ignored_language') {
-          return prev.filter((t) => t.id !== data.id);
+          return prev.map((t) => (t.id === data.id ? { ...t, status: 'ignored', error: 'Langue non configurée' } : t));
         }
         
         return prev.map((t) => (t.id === data.id ? { ...t, ...data } : t));
@@ -280,7 +281,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const clearCompleted = () => {
     setTasks((prev) =>
-      prev.filter((t) => t.status !== "completed" && t.status !== "error"),
+      prev.filter((t) => t.status !== "completed" && t.status !== "error" && t.status !== "ignored"),
     );
   };
 
