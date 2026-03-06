@@ -43,7 +43,9 @@ async function fetchHtmlWithElectron(url) {
       if (resolved) return;
       try {
         const title = await win.webContents.executeJavaScript('document.title');
-        if (title.includes('Just a moment') || title.includes('Cloudflare')) {
+        const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
+        
+        if (title.includes('Just a moment') || title.includes('Cloudflare') || bodyText.includes('Cloudflare') || bodyText.includes('Checking your browser')) {
           cloudflareTime += 1;
           if (cloudflareTime > 5 && !win.isVisible()) {
             // Show window so user can solve captcha
@@ -76,7 +78,7 @@ async function fetchHtmlWithElectron(url) {
       }
     });
 
-    win.webContents.on('did-finish-load', checkPage);
+    win.webContents.on('dom-ready', checkPage);
 
     win.loadURL(url, {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -120,8 +122,8 @@ export async function fetchGalleryLinks(url) {
         let currentUrl = url;
         let pagesFetched = 0;
         while (currentUrl && pagesFetched < 50) {
-          const res = await safeGet(currentUrl);
-          const $ = cheerio.load(res.data);
+          const html = await fetchHtmlWithElectron(currentUrl);
+          const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
             const href = $(el).attr('href');
@@ -374,8 +376,8 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
-        const res = await safeGet(url);
-        const $ = cheerio.load(res.data);
+        const html = await fetchHtmlWithElectron(url);
+        const $ = cheerio.load(html);
         title = $('h1').text().trim();
         
         // Extract artist
@@ -476,7 +478,7 @@ export async function startDownload(task, win, settings) {
     // Generic fallback
     if (imageUrls.length === 0) {
       let html = '';
-      if (hostname.includes('nhentai.net')) {
+      if (hostname.includes('nhentai.net') || hostname.includes('imhentai.xxx')) {
         html = await fetchHtmlWithElectron(url);
       } else {
         const response = await safeGet(url);
