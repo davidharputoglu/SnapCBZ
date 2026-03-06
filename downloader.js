@@ -100,36 +100,78 @@ export async function fetchGalleryLinks(url) {
     if (hostname.includes('imhentai.xxx')) {
       // If it's an artist/tag/search page, get all gallery links
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
-        const res = await axiosInstance.get(url);
-        const $ = cheerio.load(res.data);
-        $('.thumb a').each((i, el) => {
-          const href = $(el).attr('href');
-          if (href && href.includes('/gallery/')) {
-            links.push(urlObj.origin + href);
+        let currentUrl = url;
+        let pagesFetched = 0;
+        while (currentUrl && pagesFetched < 50) {
+          const res = await axiosInstance.get(currentUrl);
+          const $ = cheerio.load(res.data);
+          let found = 0;
+          $('.thumb a').each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && href.includes('/gallery/')) {
+              links.push(urlObj.origin + href);
+              found++;
+            }
+          });
+          
+          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
+            currentUrl = new URL(nextHref, urlObj.origin).href;
+            pagesFetched++;
+          } else {
+            currentUrl = null;
           }
-        });
+        }
       }
     } else if (hostname.includes('3hentai.net')) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
-        const res = await axiosInstance.get(url);
-        const $ = cheerio.load(res.data);
-        $('.grid-item a').each((i, el) => {
-          const href = $(el).attr('href');
-          if (href && href.includes('/d/')) {
-            links.push(urlObj.origin + href);
+        let currentUrl = url;
+        let pagesFetched = 0;
+        while (currentUrl && pagesFetched < 50) {
+          const res = await axiosInstance.get(currentUrl);
+          const $ = cheerio.load(res.data);
+          let found = 0;
+          $('.grid-item a').each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && href.includes('/d/')) {
+              links.push(urlObj.origin + href);
+              found++;
+            }
+          });
+          
+          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
+            currentUrl = new URL(nextHref, urlObj.origin).href;
+            pagesFetched++;
+          } else {
+            currentUrl = null;
           }
-        });
+        }
       }
     } else if (hostname.includes('nhentai.net')) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
-        const html = await fetchHtmlWithElectron(url);
-        const $ = cheerio.load(html);
-        $('.gallery a.cover').each((i, el) => {
-          const href = $(el).attr('href');
-          if (href && href.includes('/g/')) {
-            links.push(urlObj.origin + href);
+        let currentUrl = url;
+        let pagesFetched = 0;
+        while (currentUrl && pagesFetched < 50) {
+          const html = await fetchHtmlWithElectron(currentUrl);
+          const $ = cheerio.load(html);
+          let found = 0;
+          $('.gallery a.cover').each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && href.includes('/g/')) {
+              links.push(urlObj.origin + href);
+              found++;
+            }
+          });
+          
+          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
+            currentUrl = new URL(nextHref, urlObj.origin).href;
+            pagesFetched++;
+          } else {
+            currentUrl = null;
           }
-        });
+        }
       }
     }
 
