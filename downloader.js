@@ -34,7 +34,8 @@ async function fetchHtmlWithElectron(url) {
     const timeout = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        win.destroy();
+        if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
+        try { win.destroy(); } catch (e) {}
         reject(new Error("Timeout waiting for Cloudflare bypass"));
       }
     }, 45000); // Increased to 45s to give user time to solve captcha
@@ -45,48 +46,54 @@ async function fetchHtmlWithElectron(url) {
         const title = await win.webContents.executeJavaScript('document.title');
         const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
         
-        if (title.includes('Just a moment') || title.includes('Cloudflare') || bodyText.includes('Cloudflare') || bodyText.includes('Checking your browser')) {
+        if (title.includes('Just a moment') || title.includes('Cloudflare') || bodyText.includes('Cloudflare') || bodyText.includes('Checking your browser') || bodyText.includes('Verify you are human')) {
           cloudflareTime += 1;
-          if (cloudflareTime > 5 && !win.isVisible()) {
+          if (cloudflareTime > 3 && !win.isVisible()) {
             // Show window so user can solve captcha
             win.show();
             win.setTitle("Veuillez résoudre le captcha Cloudflare pour continuer...");
           }
-          // Still on Cloudflare challenge, check again in 1 second
-          setTimeout(checkPage, 1000);
-          return;
+          return; // Wait for next interval
+        }
+        
+        // Ensure page has actually loaded some content (not just a blank page during redirect)
+        const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
+        if (bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+          return; // Wait for next interval
         }
         
         const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
         if (!resolved) {
           resolved = true;
+          clearInterval(checkInterval);
           clearTimeout(timeout);
-          win.destroy();
+          try { win.destroy(); } catch (e) {}
           resolve(html);
         }
       } catch (e) {
         // Ignore errors during execution, try again
-        if (!resolved) setTimeout(checkPage, 1000);
       }
     };
+
+    const checkInterval = setInterval(checkPage, 1000);
 
     win.on('closed', () => {
       if (!resolved) {
         resolved = true;
+        clearInterval(checkInterval);
         clearTimeout(timeout);
         reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
       }
     });
-
-    win.webContents.on('dom-ready', checkPage);
 
     win.loadURL(url, {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }).catch(e => {
       if (!resolved) {
         resolved = true;
+        if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
         clearTimeout(timeout);
-        win.destroy();
+        try { win.destroy(); } catch (err) {}
         reject(e);
       }
     });
@@ -478,24 +485,26 @@ export async function startDownload(task, win, settings) {
     // Generic fallback
     if (imageUrls.length === 0) {
       let html = '';
-      if (hostname.includes('nhentai.net') || hostname.includes('imhentai.xxx')) {
+      if (hostname.includes('nhentai.net')) {
         html = await fetchHtmlWithElectron(url);
-      } else {
+      } else if (!hostname.includes('imhentai.xxx')) {
         const response = await safeGet(url);
         html = response.data;
       }
       
-      const $ = cheerio.load(html);
-      title = $('title').text().replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
-      
-      $('img').each((i, el) => {
-        let src = $(el).attr('src') || $(el).attr('data-src');
-        if (src) {
-          if (src.startsWith('//')) src = 'https:' + src;
-          else if (src.startsWith('/')) src = urlObj.origin + src;
-          if (src.startsWith('http')) imageUrls.push(src);
-        }
-      });
+      if (html) {
+        const $ = cheerio.load(html);
+        title = $('title').text().replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
+        
+        $('img').each((i, el) => {
+          let src = $(el).attr('src') || $(el).attr('data-src');
+          if (src) {
+            if (src.startsWith('//')) src = 'https:' + src;
+            else if (src.startsWith('/')) src = urlObj.origin + src;
+            if (src.startsWith('http')) imageUrls.push(src);
+          }
+        });
+      }
     }
 
     const uniqueImages = [...new Set(imageUrls)];
