@@ -642,3 +642,4 @@ export async function startDownload(task, win, settings) {
     win.webContents.send('download-progress', { id, status: 'error', error: error.message });
   }
 }
+
