@@ -16,115 +16,133 @@ const axiosInstance = axios.create({
   }
 });
 
+let scraperQueue = Promise.resolve();
+
 async function fetchHtmlWithElectron(url, existingWin = null) {
-  return new Promise((resolve, reject) => {
-    const win = existingWin || new BrowserWindow({
-      show: false,
-      width: 800,
-      height: 600,
-      webPreferences: {
-        nodeIntegration: false,
-        contextIsolation: true,
-        partition: 'persist:scraper'
-      }
-    });
-
-    let resolved = false;
-    let cloudflareTime = 0;
-    let timeElapsed = 0;
-
-    const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
-        if (!existingWin) { try { win.destroy(); } catch (e) {} }
-        reject(new Error("Timeout waiting for Cloudflare bypass"));
-      }
-    }, 45000); // Increased to 45s to give user time to solve captcha
-
-    const checkPage = async () => {
-      if (resolved) return;
-      timeElapsed += 1;
-      try {
-        const title = await win.webContents.executeJavaScript('document.title');
-        const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
-        
-        if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
-          if (!resolved) {
-            resolved = true;
-            clearInterval(checkInterval);
-            clearTimeout(timeout);
-            if (!existingWin) { try { win.destroy(); } catch (e) {} }
-            reject(new Error(`Erreur du site: ${title}`));
-          }
-          return;
-        }
-
-        const isCloudflare = title.includes('Just a moment') || 
-                             title.includes('Cloudflare') || 
-                             bodyText.includes('Cloudflare') || 
-                             bodyText.includes('Checking your browser') || 
-                             bodyText.includes('Verify you are human') ||
-                             await win.webContents.executeJavaScript('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
-
-        if (isCloudflare) {
-          cloudflareTime += 1;
-        }
-
-        // Show window if we detect Cloudflare OR if it's taking too long (might be an unknown captcha)
-        if ((cloudflareTime > 2 || timeElapsed > 5) && !win.isVisible()) {
-          win.show();
-          win.setTitle("Veuillez patienter ou résoudre le captcha si nécessaire...");
-        }
-
-        if (isCloudflare) {
-          return; // Wait for next interval
-        }
-        
-        // Ensure page has actually loaded some content (not just a blank page during redirect)
-        const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
-        if (bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
-          return; // Wait for next interval
-        }
-        
-        const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
-        if (!resolved) {
-          resolved = true;
-          clearInterval(checkInterval);
-          clearTimeout(timeout);
-          if (!existingWin) { try { win.destroy(); } catch (e) {} }
-          resolve(html);
-        }
-      } catch (e) {
-        // Ignore errors during execution, try again
-      }
-    };
-
-    const checkInterval = setInterval(checkPage, 1000);
-
-    if (!existingWin) {
-      win.on('closed', () => {
-        if (!resolved) {
-          resolved = true;
-          clearInterval(checkInterval);
-          clearTimeout(timeout);
-          reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
+  const executeFetch = async () => {
+    return new Promise((resolve, reject) => {
+      const win = existingWin || new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          partition: 'persist:scraper'
         }
       });
-    }
 
-    win.loadURL(url, {
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }).catch(e => {
-      if (!resolved) {
-        resolved = true;
-        if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
-        clearTimeout(timeout);
-        if (!existingWin) { try { win.destroy(); } catch (err) {} }
-        reject(e);
+      let resolved = false;
+      let cloudflareTime = 0;
+      let timeElapsed = 0;
+
+      const timeout = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+          if (!existingWin) { try { win.destroy(); } catch (e) {} }
+          reject(new Error("Timeout waiting for Cloudflare bypass"));
+        }
+      }, 45000); // Increased to 45s to give user time to solve captcha
+
+      let checkTimeout;
+      const checkPage = async () => {
+        if (resolved) return;
+        timeElapsed += 1;
+        try {
+          const title = await win.webContents.executeJavaScript('document.title');
+          const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
+          
+          if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(checkTimeout);
+              clearTimeout(timeout);
+              if (!existingWin) { try { win.destroy(); } catch (e) {} }
+              reject(new Error(`Erreur du site: ${title}`));
+            }
+            return;
+          }
+
+          const isCloudflare = title.includes('Just a moment') || 
+                               title.includes('Cloudflare') || 
+                               bodyText.includes('Cloudflare') || 
+                               bodyText.includes('Checking your browser') || 
+                               bodyText.includes('Verify you are human') ||
+                               await win.webContents.executeJavaScript('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
+
+          if (isCloudflare) {
+            cloudflareTime += 1;
+          }
+
+          // Show window if we detect Cloudflare OR if it's taking too long (might be an unknown captcha)
+          if ((cloudflareTime > 2 || timeElapsed > 5) && !win.isVisible()) {
+            win.show();
+            win.setTitle("Veuillez patienter ou résoudre le captcha si nécessaire...");
+          }
+
+          if (isCloudflare) {
+            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+            return; // Wait for next interval
+          }
+          
+          // Ensure page has actually loaded some content (not just a blank page during redirect)
+          const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
+          if (bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+            return; // Wait for next interval
+          }
+          
+          const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(checkTimeout);
+            clearTimeout(timeout);
+            if (!existingWin) { try { win.destroy(); } catch (e) {} }
+            resolve(html);
+          }
+        } catch (e) {
+          // Ignore errors during execution, try again
+          if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+        }
+      };
+
+      checkTimeout = setTimeout(checkPage, 1000);
+
+      if (!existingWin) {
+        win.on('closed', () => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(checkTimeout);
+            clearTimeout(timeout);
+            reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
+          }
+        });
       }
+
+      win.loadURL(url, {
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }).catch(e => {
+        if (!resolved) {
+          resolved = true;
+          if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+          clearTimeout(timeout);
+          if (!existingWin) { try { win.destroy(); } catch (err) {} }
+          reject(e);
+        }
+      });
     });
-  });
+  };
+
+  // If using an existing window (e.g. for fetching gallery links sequentially), bypass the queue to avoid deadlocks
+  if (existingWin) {
+    return executeFetch();
+  }
+
+  // Otherwise, queue the request so we don't open 50 windows at once
+  const currentTask = scraperQueue.then(() => executeFetch(), () => executeFetch());
+  scraperQueue = currentTask.catch(() => {}); // Prevent unhandled rejections in the queue itself
+  return currentTask;
 }
 
 // Helper function to fetch with a strict timeout to prevent hanging

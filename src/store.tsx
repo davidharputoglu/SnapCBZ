@@ -72,8 +72,8 @@ const defaultSettings: Settings = {
   },
   imageBoardDirectory: "C:\\SnapCBZ\\ImageBoards",
   languages: [
-    { id: "fr", name: "French (Français)" },
     { id: "en", name: "English" },
+    { id: "fr", name: "French (Français)" },
     { id: "tr", name: "Turkish (Türkçe)" },
   ],
   theme: "system",
