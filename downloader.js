@@ -107,8 +107,6 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
         }
       };
 
-      checkTimeout = setTimeout(checkPage, 1000);
-
       if (!existingWin) {
         win.on('closed', () => {
           if (!resolved) {
@@ -120,17 +118,27 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
         });
       }
 
-      win.loadURL(url, {
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }).catch(e => {
-        if (!resolved) {
-          resolved = true;
-          if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
-          clearTimeout(timeout);
-          if (!existingWin) { try { win.destroy(); } catch (err) {} }
-          reject(e);
+      const startLoad = async () => {
+        if (existingWin) {
+          try { await win.webContents.executeJavaScript('document.body.innerHTML = ""; document.title = "Loading...";'); } catch(e) {}
         }
-      });
+        
+        checkTimeout = setTimeout(checkPage, 1000);
+        
+        win.loadURL(url, {
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }).catch(e => {
+          if (!resolved) {
+            resolved = true;
+            if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+            clearTimeout(timeout);
+            if (!existingWin) { try { win.destroy(); } catch (err) {} }
+            reject(e);
+          }
+        });
+      };
+      
+      startLoad();
     });
   };
 
@@ -193,14 +201,19 @@ export async function fetchGalleryLinks(url) {
           $('.thumb a, .inner_thumb a').each((i, el) => {
             const href = $(el).attr('href');
             if (href && href.includes('/gallery/')) {
-              links.push(urlObj.origin + href);
+              links.push(new URL(href, currentUrl).href);
               found++;
             }
           });
           
-          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          const nextHref = $('.pagination .next').attr('href') || 
+                           $('a[rel="next"]').attr('href') || 
+                           $('.pagination .active').next().find('a').attr('href') || 
+                           $('.pagination .page-item.active').next().find('a').attr('href') ||
+                           $('a.page-link:contains("»")').attr('href');
+                           
           if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, urlObj.origin).href;
+            currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
             currentUrl = null;
@@ -218,14 +231,19 @@ export async function fetchGalleryLinks(url) {
           $('.grid-item a').each((i, el) => {
             const href = $(el).attr('href');
             if (href && href.includes('/d/')) {
-              links.push(urlObj.origin + href);
+              links.push(new URL(href, currentUrl).href);
               found++;
             }
           });
           
-          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          const nextHref = $('.pagination .next').attr('href') || 
+                           $('a[rel="next"]').attr('href') || 
+                           $('.pagination .active').next().find('a').attr('href') || 
+                           $('.pagination .page-item.active').next().find('a').attr('href') ||
+                           $('a.page-link:contains("»")').attr('href');
+                           
           if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, urlObj.origin).href;
+            currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
             currentUrl = null;
@@ -255,14 +273,19 @@ export async function fetchGalleryLinks(url) {
           $('.gallery a.cover').each((i, el) => {
             const href = $(el).attr('href');
             if (href && href.includes('/g/')) {
-              links.push(urlObj.origin + href);
+              links.push(new URL(href, currentUrl).href);
               found++;
             }
           });
           
-          const nextHref = $('.pagination .next').attr('href') || $('a[rel="next"]').attr('href');
+          const nextHref = $('.pagination .next').attr('href') || 
+                           $('a[rel="next"]').attr('href') || 
+                           $('.pagination .active').next().find('a').attr('href') || 
+                           $('.pagination .page-item.active').next().find('a').attr('href') ||
+                           $('a.page-link:contains("»")').attr('href');
+                           
           if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, urlObj.origin).href;
+            currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
             currentUrl = null;
