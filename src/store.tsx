@@ -49,6 +49,7 @@ export interface DownloadTask {
   currentFile?: string;
   finalPath?: string;
   error?: string;
+  isDirectLink?: boolean;
 }
 
 interface AppState {
@@ -261,6 +262,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             progress: 0,
             language: lang,
             category,
+            isDirectLink: urlsToProcess.length === 1 && url === galleryUrl,
           };
 
           setTasks((prev) => [initialTask, ...prev]);

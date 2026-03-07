@@ -598,6 +598,9 @@ export async function startDownload(task, win, settings) {
       if (!availableLangIds.includes(extractedLanguage)) {
         if (availableLangIds.includes('other')) {
           extractedLanguage = 'other';
+        } else if (task.isDirectLink) {
+          // Bypass language restriction for direct links
+          // Keep the extractedLanguage so it might still go to the right folder if configured
         } else {
           // Abort the download completely and tell the UI to remove the task silently
           win.webContents.send('download-progress', { 
