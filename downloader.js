@@ -30,6 +30,7 @@ async function fetchHtmlWithElectron(url) {
 
     let resolved = false;
     let cloudflareTime = 0;
+    let timeElapsed = 0;
 
     const timeout = setTimeout(() => {
       if (!resolved) {
@@ -42,17 +43,40 @@ async function fetchHtmlWithElectron(url) {
 
     const checkPage = async () => {
       if (resolved) return;
+      timeElapsed += 1;
       try {
         const title = await win.webContents.executeJavaScript('document.title');
         const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
         
-        if (title.includes('Just a moment') || title.includes('Cloudflare') || bodyText.includes('Cloudflare') || bodyText.includes('Checking your browser') || bodyText.includes('Verify you are human')) {
-          cloudflareTime += 1;
-          if (cloudflareTime > 3 && !win.isVisible()) {
-            // Show window so user can solve captcha
-            win.show();
-            win.setTitle("Veuillez résoudre le captcha Cloudflare pour continuer...");
+        if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
+          if (!resolved) {
+            resolved = true;
+            clearInterval(checkInterval);
+            clearTimeout(timeout);
+            try { win.destroy(); } catch (e) {}
+            reject(new Error(`Erreur du site: ${title}`));
           }
+          return;
+        }
+
+        const isCloudflare = title.includes('Just a moment') || 
+                             title.includes('Cloudflare') || 
+                             bodyText.includes('Cloudflare') || 
+                             bodyText.includes('Checking your browser') || 
+                             bodyText.includes('Verify you are human') ||
+                             await win.webContents.executeJavaScript('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
+
+        if (isCloudflare) {
+          cloudflareTime += 1;
+        }
+
+        // Show window if we detect Cloudflare OR if it's taking too long (might be an unknown captcha)
+        if ((cloudflareTime > 2 || timeElapsed > 5) && !win.isVisible()) {
+          win.show();
+          win.setTitle("Veuillez patienter ou résoudre le captcha si nécessaire...");
+        }
+
+        if (isCloudflare) {
           return; // Wait for next interval
         }
         
