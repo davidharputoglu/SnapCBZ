@@ -221,9 +221,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url);
             if (galleryLinks && galleryLinks.length > 0) {
               urlsToProcess = galleryLinks;
+            } else {
+              // If it's an artist page and we found no links, don't try to download the artist page itself
+              urlsToProcess = [];
+              const id = Math.random().toString(36).substring(2, 9);
+              setTasks((prev) => [{
+                id,
+                url,
+                type: "cbz",
+                filename: `Erreur d'analyse: ${new URL(url).pathname}`,
+                status: "error",
+                progress: 0,
+                error: "Aucun lien trouvé. Cloudflare a peut-être bloqué l'accès ou la page est vide."
+              }, ...prev]);
             }
           } catch (e) {
             console.error("Failed to fetch gallery links", e);
+            urlsToProcess = [];
           }
         }
 

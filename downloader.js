@@ -16,15 +16,16 @@ const axiosInstance = axios.create({
   }
 });
 
-async function fetchHtmlWithElectron(url) {
+async function fetchHtmlWithElectron(url, existingWin = null) {
   return new Promise((resolve, reject) => {
-    const win = new BrowserWindow({
+    const win = existingWin || new BrowserWindow({
       show: false,
       width: 800,
       height: 600,
       webPreferences: {
         nodeIntegration: false,
-        contextIsolation: true
+        contextIsolation: true,
+        partition: 'persist:scraper'
       }
     });
 
@@ -36,7 +37,7 @@ async function fetchHtmlWithElectron(url) {
       if (!resolved) {
         resolved = true;
         if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
-        try { win.destroy(); } catch (e) {}
+        if (!existingWin) { try { win.destroy(); } catch (e) {} }
         reject(new Error("Timeout waiting for Cloudflare bypass"));
       }
     }, 45000); // Increased to 45s to give user time to solve captcha
@@ -53,7 +54,7 @@ async function fetchHtmlWithElectron(url) {
             resolved = true;
             clearInterval(checkInterval);
             clearTimeout(timeout);
-            try { win.destroy(); } catch (e) {}
+            if (!existingWin) { try { win.destroy(); } catch (e) {} }
             reject(new Error(`Erreur du site: ${title}`));
           }
           return;
@@ -91,7 +92,7 @@ async function fetchHtmlWithElectron(url) {
           resolved = true;
           clearInterval(checkInterval);
           clearTimeout(timeout);
-          try { win.destroy(); } catch (e) {}
+          if (!existingWin) { try { win.destroy(); } catch (e) {} }
           resolve(html);
         }
       } catch (e) {
@@ -101,14 +102,16 @@ async function fetchHtmlWithElectron(url) {
 
     const checkInterval = setInterval(checkPage, 1000);
 
-    win.on('closed', () => {
-      if (!resolved) {
-        resolved = true;
-        clearInterval(checkInterval);
-        clearTimeout(timeout);
-        reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
-      }
-    });
+    if (!existingWin) {
+      win.on('closed', () => {
+        if (!resolved) {
+          resolved = true;
+          clearInterval(checkInterval);
+          clearTimeout(timeout);
+          reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
+        }
+      });
+    }
 
     win.loadURL(url, {
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -117,7 +120,7 @@ async function fetchHtmlWithElectron(url) {
         resolved = true;
         if (typeof checkInterval !== 'undefined') clearInterval(checkInterval);
         clearTimeout(timeout);
-        try { win.destroy(); } catch (err) {}
+        if (!existingWin) { try { win.destroy(); } catch (err) {} }
         reject(e);
       }
     });
@@ -142,6 +145,7 @@ async function safeGet(url, config = {}) {
 }
 
 export async function fetchGalleryLinks(url) {
+  let scraperWin = null;
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
@@ -152,8 +156,20 @@ export async function fetchGalleryLinks(url) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
         let currentUrl = url;
         let pagesFetched = 0;
+        
+        scraperWin = new BrowserWindow({
+          show: false,
+          width: 800,
+          height: 600,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: 'persist:scraper'
+          }
+        });
+
         while (currentUrl && pagesFetched < 50) {
-          const html = await fetchHtmlWithElectron(currentUrl);
+          const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -202,8 +218,20 @@ export async function fetchGalleryLinks(url) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
         let currentUrl = url;
         let pagesFetched = 0;
+        
+        scraperWin = new BrowserWindow({
+          show: false,
+          width: 800,
+          height: 600,
+          webPreferences: {
+            nodeIntegration: false,
+            contextIsolation: true,
+            partition: 'persist:scraper'
+          }
+        });
+
         while (currentUrl && pagesFetched < 50) {
-          const html = await fetchHtmlWithElectron(currentUrl);
+          const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
           $('.gallery a.cover').each((i, el) => {
@@ -225,9 +253,16 @@ export async function fetchGalleryLinks(url) {
       }
     }
 
+    if (scraperWin) {
+      try { scraperWin.destroy(); } catch (e) {}
+    }
+
     // Return unique links
     return [...new Set(links)];
   } catch (error) {
+    if (scraperWin) {
+      try { scraperWin.destroy(); } catch (e) {}
+    }
     console.error("Error fetching gallery links:", error.message);
     return [];
   }
