@@ -216,7 +216,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         // Check if it's an artist/tag page that needs expanding
         let urlsToProcess = [url];
         
-        if (ipcRenderer && (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/'))) {
+        if (ipcRenderer && (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/'))) {
           try {
             const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url);
             if (galleryLinks && galleryLinks.length > 0) {

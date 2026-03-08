@@ -178,8 +178,8 @@ export async function fetchGalleryLinks(url) {
     const links = [];
 
     if (hostname.includes('imhentai.xxx')) {
-      // If it's an artist/tag/search page, get all gallery links
-      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+      // If it's an artist/tag/search/group/parody/character page, get all gallery links
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
         
@@ -221,7 +221,7 @@ export async function fetchGalleryLinks(url) {
         }
       }
     } else if (hostname.includes('3hentai.net')) {
-      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
         while (currentUrl && pagesFetched < 50) {
@@ -251,7 +251,7 @@ export async function fetchGalleryLinks(url) {
         }
       }
     } else if (hostname.includes('nhentai.net')) {
-      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/')) {
+      if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
         
