@@ -31,6 +31,9 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           partition: 'persist:scraper'
         }
       });
+      if (!existingWin) {
+        win.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+      }
 
       let resolved = false;
       let cloudflareTime = 0;
@@ -87,8 +90,10 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           }
           
           // Ensure page has actually loaded some content (not just a blank page during redirect)
+          const readyState = await win.webContents.executeJavaScript('document.readyState');
           const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
-          if (bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+          
+          if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             return; // Wait for next interval
           }
@@ -193,6 +198,7 @@ export async function fetchGalleryLinks(url) {
             partition: 'persist:scraper'
           }
         });
+        scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
           const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
@@ -216,6 +222,11 @@ export async function fetchGalleryLinks(url) {
             currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
+            if (found === 0 && pagesFetched === 0) {
+              const title = $('title').text().trim();
+              const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
+              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+            }
             currentUrl = null;
           }
         }
@@ -246,6 +257,11 @@ export async function fetchGalleryLinks(url) {
             currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
+            if (found === 0 && pagesFetched === 0) {
+              const title = $('title').text().trim();
+              const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
+              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+            }
             currentUrl = null;
           }
         }
@@ -265,6 +281,7 @@ export async function fetchGalleryLinks(url) {
             partition: 'persist:scraper'
           }
         });
+        scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
           const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
@@ -288,6 +305,11 @@ export async function fetchGalleryLinks(url) {
             currentUrl = new URL(nextHref, currentUrl).href;
             pagesFetched++;
           } else {
+            if (found === 0 && pagesFetched === 0) {
+              const title = $('title').text().trim();
+              const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
+              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+            }
             currentUrl = null;
           }
         }
@@ -305,7 +327,7 @@ export async function fetchGalleryLinks(url) {
       try { scraperWin.destroy(); } catch (e) {}
     }
     console.error("Error fetching gallery links:", error.message);
-    return [];
+    throw error;
   }
 }
 
