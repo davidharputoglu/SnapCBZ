@@ -137,10 +137,6 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
       }
 
       const startLoad = async () => {
-        if (existingWin) {
-          try { await win.webContents.executeJavaScript('document.body.innerHTML = ""; document.title = "Loading...";'); } catch(e) {}
-        }
-        
         checkTimeout = setTimeout(checkPage, 1000);
         
         win.loadURL(url, {
