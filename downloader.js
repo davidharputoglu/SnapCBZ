@@ -49,13 +49,20 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
         }
       }, 45000); // Increased to 45s to give user time to solve captcha
 
+      const executeWithTimeout = (script, ms = 2000) => {
+        return Promise.race([
+          win.webContents.executeJavaScript(script),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Script timeout')), ms))
+        ]);
+      };
+
       let checkTimeout;
       const checkPage = async () => {
         if (resolved) return;
         timeElapsed += 1;
         try {
-          const title = await win.webContents.executeJavaScript('document.title');
-          const bodyText = await win.webContents.executeJavaScript('document.body.innerText || ""');
+          const title = await executeWithTimeout('document.title');
+          const bodyText = await executeWithTimeout('document.body.innerText || ""');
           
           if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
             if (!resolved) {
@@ -72,7 +79,7 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
                                title.includes('Cloudflare') || 
                                bodyText.includes('Checking your browser') || 
                                bodyText.includes('Verify you are human') ||
-                               await win.webContents.executeJavaScript('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
+                               await executeWithTimeout('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
 
           if (isCloudflare) {
             cloudflareTime += 1;
@@ -92,8 +99,8 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           }
           
           // Ensure page has actually loaded some content (not just a blank page during redirect)
-          const readyState = await win.webContents.executeJavaScript('document.readyState');
-          const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
+          const readyState = await executeWithTimeout('document.readyState');
+          const imgCount = await executeWithTimeout('document.querySelectorAll("img").length');
           
           if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
             lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
@@ -102,7 +109,7 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
             return; // Wait for next interval
           }
           
-          const html = await win.webContents.executeJavaScript('document.documentElement.outerHTML');
+          const html = await executeWithTimeout('document.documentElement.outerHTML');
           if (!resolved) {
             resolved = true;
             clearTimeout(checkTimeout);
