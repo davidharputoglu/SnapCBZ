@@ -4,7 +4,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import archiver from 'archiver';
 import crypto from 'crypto';
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 
 const axiosInstance = axios.create({
   timeout: 15000, // 15 seconds timeout to prevent getting stuck
@@ -418,6 +418,9 @@ export async function startDownload(task, win, settings) {
                  else if (langTag.name === 'russian') extractedLanguage = 'ru';
                  else if (langTag.name === 'german') extractedLanguage = 'de';
                  else if (langTag.name === 'italian') extractedLanguage = 'it';
+                 else extractedLanguage = 'other';
+              } else {
+                 extractedLanguage = 'other';
               }
 
               const mediaId = galleryData.media_id;
@@ -446,6 +449,7 @@ export async function startDownload(task, win, settings) {
               else if (langText.includes('japanese')) extractedLanguage = 'jp';
               else if (langText.includes('korean')) extractedLanguage = 'kr';
               else if (langText.includes('chinese')) extractedLanguage = 'cn';
+              else extractedLanguage = 'other';
               
               $('.gallerythumb img').each((i, el) => {
                 let src = $(el).attr('data-src') || $(el).attr('src');
@@ -493,6 +497,7 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('russian') || langText.includes('русский')) extractedLanguage = 'ru';
         else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
+        else extractedLanguage = 'other';
 
         $('.page-container img').each((i, el) => {
           let src = $(el).attr('data-src') || $(el).attr('src');
@@ -545,6 +550,7 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('russian') || langText.includes('русский')) extractedLanguage = 'ru';
         else if (langText.includes('german') || langText.includes('deutsch')) extractedLanguage = 'de';
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
+        else extractedLanguage = 'other';
 
         // Extract base URL from the first thumbnail
         const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
@@ -644,6 +650,15 @@ export async function startDownload(task, win, settings) {
       throw new Error('Aucune image trouvée sur cette page.');
     }
 
+    // Get cookies from the scraper session to bypass Cloudflare for image downloads
+    let cookieString = '';
+    try {
+      const cookies = await session.fromPartition('persist:scraper').cookies.get({ url: urlObj.origin });
+      cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    } catch (e) {
+      console.error("Failed to get cookies:", e);
+    }
+
     const totalImages = uniqueImages.length;
     let saveDir = '';
     let finalFilename = '';
@@ -664,7 +679,10 @@ export async function startDownload(task, win, settings) {
           
           const imgRes = await axiosInstance.get(imgUrl, { 
             responseType: 'arraybuffer',
-            headers: { 'Referer': url },
+            headers: { 
+              'Referer': url,
+              'Cookie': cookieString
+            },
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -750,7 +768,10 @@ export async function startDownload(task, win, settings) {
           
           const imgRes = await axiosInstance.get(imgUrl, { 
             responseType: 'arraybuffer',
-            headers: { 'Referer': url },
+            headers: { 
+              'Referer': url,
+              'Cookie': cookieString
+            },
             signal: controller.signal
           });
           clearTimeout(timeoutId);
