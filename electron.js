@@ -102,7 +102,7 @@ ipcMain.handle('fetch-gallery-links', async (event, url) => {
     return await fetchGalleryLinks(url);
   } catch (error) {
     console.error('Failed to fetch gallery links:', error);
-    return [];
+    throw error;
   }
 });
 

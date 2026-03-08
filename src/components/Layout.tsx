@@ -64,7 +64,7 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <div className="p-4 border-t border-border">
           <div className="text-xs text-center text-muted-foreground flex flex-col gap-1">
-            <span>Version 1.0.3</span>
+            <span>Version 1.0.4</span>
             <span className="font-medium">{t("created_by")} David HARPUTOGLU</span>
           </div>
         </div>

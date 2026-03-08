@@ -239,6 +239,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             console.error("Failed to fetch gallery links", e);
             urlsToProcess = [];
             const id = Math.random().toString(36).substring(2, 9);
+            let errorMessage = e.message || "Erreur lors de la récupération des liens de la galerie.";
+            if (errorMessage.includes("Error invoking remote method")) {
+              errorMessage = errorMessage.split("Error: ").pop() || errorMessage;
+            }
             setTasks((prev) => [{
               id,
               url,
@@ -246,7 +250,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               filename: `Erreur d'analyse: ${new URL(url).pathname}`,
               status: "error",
               progress: 0,
-              error: e.message || "Erreur lors de la récupération des liens de la galerie."
+              error: errorMessage
             }, ...prev]);
           }
         }

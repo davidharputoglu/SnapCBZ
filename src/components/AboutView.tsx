@@ -91,7 +91,7 @@ export const AboutView: React.FC = () => {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-foreground">SnapCBZ</h2>
-                <p className="text-sm text-muted-foreground">Version 1.0.3</p>
+                <p className="text-sm text-muted-foreground">Version 1.0.4</p>
                 <p className="text-xs text-muted-foreground mt-1">{t("created_by")} David HARPUTOGLU</p>
               </div>
             </div>
