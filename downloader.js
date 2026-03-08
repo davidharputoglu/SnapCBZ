@@ -39,12 +39,13 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
       let cloudflareTime = 0;
       let timeElapsed = 0;
 
+      let lastState = "";
       const timeout = setTimeout(() => {
         if (!resolved) {
           resolved = true;
           if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
           if (!existingWin) { try { win.destroy(); } catch (e) {} }
-          reject(new Error("Timeout waiting for Cloudflare bypass"));
+          reject(new Error(`Timeout waiting for Cloudflare bypass. Last state: ${lastState}`));
         }
       }, 45000); // Increased to 45s to give user time to solve captcha
 
@@ -69,7 +70,6 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
 
           const isCloudflare = title.includes('Just a moment') || 
                                title.includes('Cloudflare') || 
-                               bodyText.includes('Cloudflare') || 
                                bodyText.includes('Checking your browser') || 
                                bodyText.includes('Verify you are human') ||
                                await win.webContents.executeJavaScript('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
@@ -85,6 +85,8 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           }
 
           if (isCloudflare) {
+            lastState = `Cloudflare detected: title="${title}", bodyText.length=${bodyText.length}`;
+            console.log(lastState);
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             return; // Wait for next interval
           }
@@ -94,6 +96,8 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           const imgCount = await win.webContents.executeJavaScript('document.querySelectorAll("img").length');
           
           if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+            lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
+            console.log(lastState);
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             return; // Wait for next interval
           }
@@ -108,6 +112,8 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
           }
         } catch (e) {
           // Ignore errors during execution, try again
+          lastState = `Error in checkPage: ${e.message}`;
+          console.error(lastState);
           if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
         }
       };
