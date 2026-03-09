@@ -707,17 +707,27 @@ export async function startDownload(task, win, settings) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
-          const imgRes = await session.fromPartition('persist:scraper').fetch(imgUrl, { 
+          const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 'Referer': url },
             signal: controller.signal
           });
-          clearTimeout(timeoutId);
+          
+          const imgRes = await Promise.race([
+            fetchPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+          ]);
           
           if (!imgRes.ok) {
+            clearTimeout(timeoutId);
             throw new Error(`HTTP error! status: ${imgRes.status}`);
           }
           
-          const arrayBuffer = await imgRes.arrayBuffer();
+          const arrayBuffer = await Promise.race([
+            imgRes.arrayBuffer(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
+          ]);
+          clearTimeout(timeoutId);
+          
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
           const filePath = path.join(saveDir, fileName);
@@ -797,17 +807,27 @@ export async function startDownload(task, win, settings) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
-          const imgRes = await session.fromPartition('persist:scraper').fetch(imgUrl, { 
+          const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 'Referer': url },
             signal: controller.signal
           });
-          clearTimeout(timeoutId);
+          
+          const imgRes = await Promise.race([
+            fetchPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+          ]);
           
           if (!imgRes.ok) {
+            clearTimeout(timeoutId);
             throw new Error(`HTTP error! status: ${imgRes.status}`);
           }
           
-          const arrayBuffer = await imgRes.arrayBuffer();
+          const arrayBuffer = await Promise.race([
+            imgRes.arrayBuffer(),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
+          ]);
+          clearTimeout(timeoutId);
+          
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
