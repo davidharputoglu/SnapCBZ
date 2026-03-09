@@ -18,6 +18,36 @@ const axiosInstance = axios.create({
 
 let scraperQueue = Promise.resolve();
 
+async function fastFetchHtml(url, existingWin = null) {
+  try {
+    const scraperSession = session.fromPartition('persist:scraper');
+    scraperSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+    
+    const res = await scraperSession.fetch(url, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Referer': 'https://google.com/'
+      },
+      signal: controller.signal
+    });
+    clearTimeout(timeoutId);
+    
+    const html = await res.text();
+    
+    if (html.includes('Just a moment') || html.includes('Cloudflare') || html.includes('Verify you are human')) {
+      return await fetchHtmlWithElectron(url, existingWin);
+    }
+    
+    return html;
+  } catch (err) {
+    return await fetchHtmlWithElectron(url, existingWin);
+  }
+}
+
 async function fetchHtmlWithElectron(url, existingWin = null) {
   const executeFetch = async () => {
     return new Promise((resolve, reject) => {
@@ -210,7 +240,7 @@ export async function fetchGalleryLinks(url) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
-          const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
+          const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -293,7 +323,7 @@ export async function fetchGalleryLinks(url) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
-          const html = await fetchHtmlWithElectron(currentUrl, scraperWin);
+          const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
           $('.gallery a.cover').each((i, el) => {
@@ -382,7 +412,7 @@ export async function startDownload(task, win, settings) {
         if (match) {
           const galleryId = match[1];
           try {
-            const html = await fetchHtmlWithElectron(url);
+            const html = await fastFetchHtml(url);
             const $ = cheerio.load(html);
             
             let galleryData = null;
@@ -519,7 +549,7 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
-        const html = await fetchHtmlWithElectron(url);
+        const html = await fastFetchHtml(url);
         const $ = cheerio.load(html);
         title = $('h1').text().trim();
         
@@ -623,7 +653,7 @@ export async function startDownload(task, win, settings) {
     if (imageUrls.length === 0) {
       let html = '';
       if (hostname.includes('nhentai.net')) {
-        html = await fetchHtmlWithElectron(url);
+        html = await fastFetchHtml(url);
       } else if (!hostname.includes('imhentai.xxx')) {
         const response = await safeGet(url);
         html = response.data;
@@ -677,21 +707,22 @@ export async function startDownload(task, win, settings) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
-          const imgRes = await axiosInstance.get(imgUrl, { 
-            responseType: 'arraybuffer',
-            headers: { 
-              'Referer': url,
-              'Cookie': cookieString
-            },
+          const imgRes = await session.fromPartition('persist:scraper').fetch(imgUrl, { 
+            headers: { 'Referer': url },
             signal: controller.signal
           });
           clearTimeout(timeoutId);
           
+          if (!imgRes.ok) {
+            throw new Error(`HTTP error! status: ${imgRes.status}`);
+          }
+          
+          const arrayBuffer = await imgRes.arrayBuffer();
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
           const filePath = path.join(saveDir, fileName);
           
-          await fs.writeFile(filePath, imgRes.data);
+          await fs.writeFile(filePath, Buffer.from(arrayBuffer));
           downloadedCount++;
           
           win.webContents.send('download-progress', { 
@@ -766,19 +797,20 @@ export async function startDownload(task, win, settings) {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
-          const imgRes = await axiosInstance.get(imgUrl, { 
-            responseType: 'arraybuffer',
-            headers: { 
-              'Referer': url,
-              'Cookie': cookieString
-            },
+          const imgRes = await session.fromPartition('persist:scraper').fetch(imgUrl, { 
+            headers: { 'Referer': url },
             signal: controller.signal
           });
           clearTimeout(timeoutId);
           
+          if (!imgRes.ok) {
+            throw new Error(`HTTP error! status: ${imgRes.status}`);
+          }
+          
+          const arrayBuffer = await imgRes.arrayBuffer();
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           const fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
-          await fs.writeFile(path.join(tempDir, fileName), imgRes.data);
+          await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
           downloadedCount++;
           
           win.webContents.send('download-progress', { 
