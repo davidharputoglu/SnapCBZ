@@ -63,15 +63,6 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
       });
       if (!existingWin) {
         win.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-        
-        // Block images and stylesheets to speed up loading
-        win.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
-            callback({ cancel: true });
-          } else {
-            callback({ cancel: false });
-          }
-        });
       }
 
       let resolved = false;
@@ -247,15 +238,6 @@ export async function fetchGalleryLinks(url, onProgress = null) {
           }
         });
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-        
-        // Block images and stylesheets to speed up loading
-        scraperWin.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
-            callback({ cancel: true });
-          } else {
-            callback({ cancel: false });
-          }
-        });
 
         while (currentUrl && pagesFetched < 50) {
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
@@ -341,15 +323,6 @@ export async function fetchGalleryLinks(url, onProgress = null) {
           }
         });
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-        
-        // Block images and stylesheets to speed up loading
-        scraperWin.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
-            callback({ cancel: true });
-          } else {
-            callback({ cancel: false });
-          }
-        });
 
         while (currentUrl && pagesFetched < 50) {
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
@@ -789,6 +762,10 @@ export async function startDownload(task, win, settings) {
     } else {
       // CBZ Mode
       
+      // Clean up the category/artist name for the folder (replace spaces with hyphens)
+      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/\s+/g, '-');
+      title = title.replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
+
       // Ensure the language matches one of the user's configured languages
       const configuredLangs = settings.languages || [];
       const availableLangIds = configuredLangs.map(l => l.id);
@@ -804,7 +781,10 @@ export async function startDownload(task, win, settings) {
           // Abort the download completely and tell the UI to remove the task silently
           win.webContents.send('download-progress', { 
             id, 
-            status: 'ignored_language'
+            status: 'ignored_language',
+            filename: title,
+            category: cleanCategory,
+            language: extractedLanguage
           });
           return; // Stop execution
         }
@@ -812,12 +792,9 @@ export async function startDownload(task, win, settings) {
 
       const baseDir = settings.directories[extractedLanguage] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
       
-      // Clean up the category/artist name for the folder (replace spaces with hyphens)
-      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/\s+/g, '-');
       saveDir = path.join(baseDir, cleanCategory);
       await fs.ensureDir(saveDir);
       
-      title = title.replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
       finalFilename = `${title}.cbz`;
       const finalPath = path.join(saveDir, finalFilename);
       

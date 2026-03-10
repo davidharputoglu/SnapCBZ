@@ -159,7 +159,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setTasks((prev) => {
         // If the language is ignored, mark it as ignored so the user understands why it was skipped
         if (data.status === 'ignored_language') {
-          return prev.map((t) => (t.id === data.id ? { ...t, status: 'ignored', error: 'Langue non configurée' } : t));
+          return prev.map((t) => (t.id === data.id ? { ...t, ...data, status: 'ignored', error: 'Langue non configurée' } : t));
         }
         
         return prev.map((t) => (t.id === data.id ? { ...t, ...data } : t));
