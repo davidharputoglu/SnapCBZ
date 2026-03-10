@@ -26,7 +26,7 @@ async function fastFetchHtml(url, existingWin = null) {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 15000);
     
-    const res = await scraperSession.fetch(url, {
+    const fetchPromise = scraperSession.fetch(url, {
       headers: {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
@@ -34,9 +34,19 @@ async function fastFetchHtml(url, existingWin = null) {
       },
       signal: controller.signal
     });
+    
+    const res = await Promise.race([
+      fetchPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+    ]);
+    
     clearTimeout(timeoutId);
     
-    const html = await res.text();
+    const textPromise = res.text();
+    const html = await Promise.race([
+      textPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 15000))
+    ]);
     
     if (html.includes('Just a moment') || html.includes('Cloudflare') || html.includes('Verify you are human')) {
       return await fetchHtmlWithElectron(url, existingWin);
@@ -202,10 +212,16 @@ async function safeGet(url, config = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
   try {
-    const res = await axiosInstance.get(url, {
+    const getPromise = axiosInstance.get(url, {
       ...config,
       signal: controller.signal
     });
+    
+    const res = await Promise.race([
+      getPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Axios timeout')), 20000))
+    ]);
+    
     clearTimeout(timeoutId);
     return res;
   } catch (err) {
