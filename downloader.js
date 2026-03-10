@@ -819,8 +819,10 @@ export async function startDownload(task, win, settings) {
       
       win.webContents.send('download-progress', { 
         id, 
-        status: 'downloading', 
+        status: 'downloading_images', 
         progress: 10, 
+        downloadedCount: 0,
+        totalImages,
         filename: `Downloading ${totalImages} images...`,
         category: cleanCategory, // Send back the real artist name to update the UI
         language: extractedLanguage // Send back the real language to update the UI
@@ -863,7 +865,10 @@ export async function startDownload(task, win, settings) {
           
           win.webContents.send('download-progress', { 
             id, 
-            progress: 10 + (((i + 1) / totalImages) * 60)
+            status: 'downloading_images',
+            downloadedCount,
+            totalImages,
+            progress: 10 + (((i + 1) / totalImages) * 70)
           });
         } catch (err) {
           if (controller) controller.abort();
@@ -871,7 +876,10 @@ export async function startDownload(task, win, settings) {
           // Still update progress so the bar doesn't get stuck
           win.webContents.send('download-progress', { 
             id, 
-            progress: 10 + (((i + 1) / totalImages) * 60)
+            status: 'downloading_images',
+            downloadedCount,
+            totalImages,
+            progress: 10 + (((i + 1) / totalImages) * 70)
           });
         }
       }
@@ -908,6 +916,15 @@ export async function startDownload(task, win, settings) {
         
         archive.on('error', (err) => {
           reject(err);
+        });
+
+        archive.on('progress', (progressData) => {
+          const percent = 80 + ((progressData.entries.processed / progressData.entries.total) * 20);
+          win.webContents.send('download-progress', { 
+            id, 
+            status: 'converting', 
+            progress: percent
+          });
         });
         
         archive.pipe(output);
