@@ -63,6 +63,15 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
       });
       if (!existingWin) {
         win.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        
+        // Block images and stylesheets to speed up loading
+        win.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
+            callback({ cancel: true });
+          } else {
+            callback({ cancel: false });
+          }
+        });
       }
 
       let resolved = false;
@@ -238,6 +247,15 @@ export async function fetchGalleryLinks(url, onProgress = null) {
           }
         });
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        
+        // Block images and stylesheets to speed up loading
+        scraperWin.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
+            callback({ cancel: true });
+          } else {
+            callback({ cancel: false });
+          }
+        });
 
         while (currentUrl && pagesFetched < 50) {
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
@@ -323,6 +341,15 @@ export async function fetchGalleryLinks(url, onProgress = null) {
           }
         });
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        
+        // Block images and stylesheets to speed up loading
+        scraperWin.webContents.session.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+          if (details.resourceType === 'image' || details.resourceType === 'stylesheet' || details.resourceType === 'font' || details.resourceType === 'media') {
+            callback({ cancel: true });
+          } else {
+            callback({ cancel: false });
+          }
+        });
 
         while (currentUrl && pagesFetched < 50) {
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
