@@ -214,7 +214,7 @@ async function safeGet(url, config = {}) {
   }
 }
 
-export async function fetchGalleryLinks(url) {
+export async function fetchGalleryLinks(url, onProgress = null) {
   let scraperWin = null;
   try {
     const urlObj = new URL(url);
@@ -240,6 +240,7 @@ export async function fetchGalleryLinks(url) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
@@ -275,6 +276,7 @@ export async function fetchGalleryLinks(url) {
         let currentUrl = url;
         let pagesFetched = 0;
         while (currentUrl && pagesFetched < 50) {
+          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const res = await safeGet(currentUrl);
           const $ = cheerio.load(res.data);
           let found = 0;
@@ -323,6 +325,7 @@ export async function fetchGalleryLinks(url) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
           let found = 0;
@@ -703,14 +706,15 @@ export async function startDownload(task, win, settings) {
       let downloadedCount = 0;
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
+        let controller;
         try {
-          const controller = new AbortController();
+          controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 'Referer': url },
             signal: controller.signal
-          });
+          }).catch(() => {});
           
           const imgRes = await Promise.race([
             fetchPromise,
@@ -722,8 +726,9 @@ export async function startDownload(task, win, settings) {
             throw new Error(`HTTP error! status: ${imgRes.status}`);
           }
           
+          const bufferPromise = imgRes.arrayBuffer().catch(() => {});
           const arrayBuffer = await Promise.race([
-            imgRes.arrayBuffer(),
+            bufferPromise,
             new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
           ]);
           clearTimeout(timeoutId);
@@ -742,6 +747,7 @@ export async function startDownload(task, win, settings) {
             currentFile: fileName
           });
         } catch (err) {
+          if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         }
       }
@@ -803,14 +809,15 @@ export async function startDownload(task, win, settings) {
       let downloadedCount = 0;
       for (let i = 0; i < uniqueImages.length; i++) {
         const imgUrl = uniqueImages[i];
+        let controller;
         try {
-          const controller = new AbortController();
+          controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 'Referer': url },
             signal: controller.signal
-          });
+          }).catch(() => {});
           
           const imgRes = await Promise.race([
             fetchPromise,
@@ -822,8 +829,9 @@ export async function startDownload(task, win, settings) {
             throw new Error(`HTTP error! status: ${imgRes.status}`);
           }
           
+          const bufferPromise = imgRes.arrayBuffer().catch(() => {});
           const arrayBuffer = await Promise.race([
-            imgRes.arrayBuffer(),
+            bufferPromise,
             new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
           ]);
           clearTimeout(timeoutId);
@@ -838,6 +846,7 @@ export async function startDownload(task, win, settings) {
             progress: 10 + (((i + 1) / totalImages) * 60)
           });
         } catch (err) {
+          if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
           // Still update progress so the bar doesn't get stuck
           win.webContents.send('download-progress', { 
@@ -871,6 +880,10 @@ export async function startDownload(task, win, settings) {
           } catch (e) {
             reject(e);
           }
+        });
+        
+        output.on('error', (err) => {
+          reject(err);
         });
         
         archive.on('error', (err) => {

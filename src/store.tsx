@@ -166,9 +166,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       });
     };
 
+    const handleFetchProgress = (event: any, data: any) => {
+      setTasks((prev) => prev.map((t) => 
+        (t.url === data.url && t.status === 'scraping') 
+          ? { ...t, filename: data.message } 
+          : t
+      ));
+    };
+
     ipcRenderer.on("download-progress", handleProgress);
+    ipcRenderer.on("fetch-gallery-progress", handleFetchProgress);
     return () => {
       ipcRenderer.removeListener("download-progress", handleProgress);
+      ipcRenderer.removeListener("fetch-gallery-progress", handleFetchProgress);
     };
   }, []);
 
@@ -217,8 +227,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         let urlsToProcess = [url];
         
         if (ipcRenderer && (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/'))) {
+          // Add a temporary task to show progress
+          const tempId = Math.random().toString(36).substring(2, 9);
+          setTasks((prev) => [{
+            id: tempId,
+            url,
+            type: "cbz",
+            filename: "Analyse des liens & filtrage...",
+            status: "scraping",
+            progress: 0,
+          }, ...prev]);
+
           try {
             const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url);
+            
+            // Remove the temporary task
+            setTasks((prev) => prev.filter(t => t.id !== tempId));
+
             if (galleryLinks && galleryLinks.length > 0) {
               urlsToProcess = galleryLinks;
             } else {
@@ -237,6 +262,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             }
           } catch (e: any) {
             console.error("Failed to fetch gallery links", e);
+            // Remove the temporary task
+            setTasks((prev) => prev.filter(t => t.id !== tempId));
+            
             urlsToProcess = [];
             const id = Math.random().toString(36).substring(2, 9);
             let errorMessage = e.message || "Erreur lors de la récupération des liens de la galerie.";

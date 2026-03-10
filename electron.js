@@ -2,8 +2,15 @@ import { app, BrowserWindow, ipcMain, dialog } from 'electron';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
+import contextMenu from 'electron-context-menu';
 import { startDownload, fetchGalleryLinks } from './downloader.js';
 const { autoUpdater } = pkg;
+
+contextMenu({
+  showSearchWithGoogle: false,
+  showCopyImage: false,
+  showInspectElement: process.env.NODE_ENV === 'development'
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -99,7 +106,9 @@ ipcMain.on('start-download', async (event, { task, settings }) => {
 
 ipcMain.handle('fetch-gallery-links', async (event, url) => {
   try {
-    return await fetchGalleryLinks(url);
+    return await fetchGalleryLinks(url, (msg) => {
+      event.sender.send('fetch-gallery-progress', { url, message: msg });
+    });
   } catch (error) {
     console.error('Failed to fetch gallery links:', error);
     throw error;
