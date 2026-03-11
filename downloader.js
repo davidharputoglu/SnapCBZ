@@ -16,7 +16,9 @@ const axiosInstance = axios.create({
   }
 });
 
-let scraperQueue = Promise.resolve();
+const maxConcurrentScrapers = 3;
+let activeScrapers = 0;
+let scraperQueue = [];
 
 async function fastFetchHtml(url, existingWin = null) {
   try {
@@ -60,6 +62,24 @@ async function fastFetchHtml(url, existingWin = null) {
 
 async function fetchHtmlWithElectron(url, existingWin = null) {
   const executeFetch = async () => {
+    // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
+    if (!existingWin) {
+      try {
+        const scraperSession = session.fromPartition('persist:scraper');
+        const res = await scraperSession.fetch(url, {
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://google.com/'
+          }
+        });
+        const html = await res.text();
+        if (!html.includes('Just a moment') && !html.includes('Cloudflare') && !html.includes('Verify you are human')) {
+          return html; // Solved by another window!
+        }
+      } catch (e) {}
+    }
+
     return new Promise((resolve, reject) => {
       const win = existingWin || new BrowserWindow({
         show: false,
@@ -201,10 +221,29 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
     return executeFetch();
   }
 
-  // Otherwise, queue the request so we don't open 50 windows at once
-  const currentTask = scraperQueue.then(() => executeFetch(), () => executeFetch());
-  scraperQueue = currentTask.catch(() => {}); // Prevent unhandled rejections in the queue itself
-  return currentTask;
+  return new Promise((resolve, reject) => {
+    const task = async () => {
+      activeScrapers++;
+      try {
+        const result = await executeFetch();
+        resolve(result);
+      } catch (e) {
+        reject(e);
+      } finally {
+        activeScrapers--;
+        if (scraperQueue.length > 0) {
+          const nextTask = scraperQueue.shift();
+          nextTask();
+        }
+      }
+    };
+
+    if (activeScrapers < maxConcurrentScrapers) {
+      task();
+    } else {
+      scraperQueue.push(task);
+    }
+  });
 }
 
 // Helper function to fetch with a strict timeout to prevent hanging
@@ -791,6 +830,10 @@ export async function startDownload(task, win, settings) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         }
+      }
+      
+      if (downloadedCount === 0) {
+        throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
       }
       
       win.webContents.send('download-progress', { 
