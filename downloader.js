@@ -717,7 +717,14 @@ export async function startDownload(task, win, settings) {
       saveDir = path.join(baseDir, copyright || 'Unknown', character || 'Unknown');
       await fs.ensureDir(saveDir);
       
-      win.webContents.send('download-progress', { id, status: 'downloading_images', progress: 0, downloadedCount: 0, totalImages });
+      win.webContents.send('download-progress', { 
+        id, 
+        status: 'downloading_images', 
+        progress: 0, 
+        downloadedCount: 0, 
+        totalImages,
+        filename: title !== 'Gallery' ? title : `Images: ${character || copyright || 'Unknown'}`
+      });
       
       let downloadedCount = 0;
       for (let i = 0; i < uniqueImages.length; i++) {
@@ -823,7 +830,7 @@ export async function startDownload(task, win, settings) {
         progress: 10, 
         downloadedCount: 0,
         totalImages,
-        filename: `Downloading ${totalImages} images...`,
+        filename: title, // Keep the real title
         category: cleanCategory, // Send back the real artist name to update the UI
         language: extractedLanguage // Send back the real language to update the UI
       });
@@ -888,7 +895,7 @@ export async function startDownload(task, win, settings) {
         throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
       }
       
-      win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: 'Creating CBZ archive...' });
+      win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
       
       const output = fs.createWriteStream(finalPath);
       const archive = archiver('zip', { zlib: { level: 9 } });
@@ -919,11 +926,12 @@ export async function startDownload(task, win, settings) {
         });
 
         archive.on('progress', (progressData) => {
-          const percent = 80 + ((progressData.entries.processed / progressData.entries.total) * 20);
+          // Use downloadedCount as the absolute total since entries.total grows dynamically
+          const percent = 80 + ((progressData.entries.processed / downloadedCount) * 20);
           win.webContents.send('download-progress', { 
             id, 
             status: 'converting', 
-            progress: percent
+            progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
           });
         });
         
