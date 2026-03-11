@@ -66,14 +66,31 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
     if (!existingWin) {
       try {
         const scraperSession = session.fromPartition('persist:scraper');
-        const res = await scraperSession.fetch(url, {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const fetchPromise = scraperSession.fetch(url, {
           headers: {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
             'Referer': 'https://google.com/'
-          }
+          },
+          signal: controller.signal
         });
-        const html = await res.text();
+        
+        const res = await Promise.race([
+          fetchPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+        ]);
+        
+        clearTimeout(timeoutId);
+        
+        const textPromise = res.text();
+        const html = await Promise.race([
+          textPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 15000))
+        ]);
+        
         if (!html.includes('Just a moment') && !html.includes('Cloudflare') && !html.includes('Verify you are human')) {
           return html; // Solved by another window!
         }
@@ -784,8 +801,9 @@ export async function startDownload(task, win, settings) {
       });
       
       let downloadedCount = 0;
-      for (let i = 0; i < uniqueImages.length; i++) {
-        const imgUrl = uniqueImages[i];
+      let processedCount = 0;
+      
+      const downloadImage = async (imgUrl, i) => {
         let controller;
         try {
           controller = new AbortController();
@@ -829,8 +847,25 @@ export async function startDownload(task, win, settings) {
         } catch (err) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
+        } finally {
+          processedCount++;
         }
+      };
+
+      const workers = [];
+      let index = 0;
+      const worker = async () => {
+        while (index < uniqueImages.length) {
+          const currentIndex = index++;
+          await downloadImage(uniqueImages[currentIndex], currentIndex);
+        }
+      };
+      
+      for (let i = 0; i < Math.min(5, uniqueImages.length); i++) {
+        workers.push(worker());
       }
+      
+      await Promise.all(workers);
       
       if (downloadedCount === 0) {
         throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
@@ -897,8 +932,9 @@ export async function startDownload(task, win, settings) {
       });
       
       let downloadedCount = 0;
-      for (let i = 0; i < uniqueImages.length; i++) {
-        const imgUrl = uniqueImages[i];
+      let processedCount = 0;
+      
+      const downloadImage = async (imgUrl, i) => {
         let controller;
         try {
           controller = new AbortController();
@@ -936,7 +972,7 @@ export async function startDownload(task, win, settings) {
             status: 'downloading_images',
             downloadedCount,
             totalImages,
-            progress: 10 + (((i + 1) / totalImages) * 70)
+            progress: 10 + ((downloadedCount / totalImages) * 70)
           });
         } catch (err) {
           if (controller) controller.abort();
@@ -947,10 +983,27 @@ export async function startDownload(task, win, settings) {
             status: 'downloading_images',
             downloadedCount,
             totalImages,
-            progress: 10 + (((i + 1) / totalImages) * 70)
+            progress: 10 + ((processedCount / totalImages) * 70)
           });
+        } finally {
+          processedCount++;
         }
+      };
+
+      const workers = [];
+      let index = 0;
+      const worker = async () => {
+        while (index < uniqueImages.length) {
+          const currentIndex = index++;
+          await downloadImage(uniqueImages[currentIndex], currentIndex);
+        }
+      };
+      
+      for (let i = 0; i < Math.min(5, uniqueImages.length); i++) {
+        workers.push(worker());
       }
+      
+      await Promise.all(workers);
       
       if (downloadedCount === 0) {
         throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
