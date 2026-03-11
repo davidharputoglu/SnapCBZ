@@ -242,6 +242,7 @@ export async function fetchGalleryLinks(url, onProgress = null) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
+        const visitedUrls = new Set();
         
         scraperWin = new BrowserWindow({
           show: false,
@@ -256,6 +257,9 @@ export async function fetchGalleryLinks(url, onProgress = null) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          if (visitedUrls.has(currentUrl)) break;
+          visitedUrls.add(currentUrl);
+          
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
@@ -274,8 +278,10 @@ export async function fetchGalleryLinks(url, onProgress = null) {
                            $('.pagination .page-item.active').next().find('a').attr('href') ||
                            $('a.page-link:contains("»")').attr('href');
                            
-          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, currentUrl).href;
+          if (found > 0 && nextHref && !nextHref.includes('javascript:') && nextHref !== '#') {
+            const nextUrl = new URL(nextHref, currentUrl).href;
+            if (nextUrl === currentUrl) break; // Prevent infinite loop on same page
+            currentUrl = nextUrl;
             pagesFetched++;
           } else {
             if (found === 0 && pagesFetched === 0) {
@@ -291,7 +297,11 @@ export async function fetchGalleryLinks(url, onProgress = null) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
+        const visitedUrls = new Set();
         while (currentUrl && pagesFetched < 50) {
+          if (visitedUrls.has(currentUrl)) break;
+          visitedUrls.add(currentUrl);
+          
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const res = await safeGet(currentUrl);
           const $ = cheerio.load(res.data);
@@ -310,8 +320,10 @@ export async function fetchGalleryLinks(url, onProgress = null) {
                            $('.pagination .page-item.active').next().find('a').attr('href') ||
                            $('a.page-link:contains("»")').attr('href');
                            
-          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, currentUrl).href;
+          if (found > 0 && nextHref && !nextHref.includes('javascript:') && nextHref !== '#') {
+            const nextUrl = new URL(nextHref, currentUrl).href;
+            if (nextUrl === currentUrl) break;
+            currentUrl = nextUrl;
             pagesFetched++;
           } else {
             if (found === 0 && pagesFetched === 0) {
@@ -327,6 +339,7 @@ export async function fetchGalleryLinks(url, onProgress = null) {
       if (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/')) {
         let currentUrl = url;
         let pagesFetched = 0;
+        const visitedUrls = new Set();
         
         scraperWin = new BrowserWindow({
           show: false,
@@ -341,6 +354,9 @@ export async function fetchGalleryLinks(url, onProgress = null) {
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          if (visitedUrls.has(currentUrl)) break;
+          visitedUrls.add(currentUrl);
+          
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin);
           const $ = cheerio.load(html);
@@ -359,8 +375,10 @@ export async function fetchGalleryLinks(url, onProgress = null) {
                            $('.pagination .page-item.active').next().find('a').attr('href') ||
                            $('a.page-link:contains("»")').attr('href');
                            
-          if (found > 0 && nextHref && !nextHref.includes('javascript:')) {
-            currentUrl = new URL(nextHref, currentUrl).href;
+          if (found > 0 && nextHref && !nextHref.includes('javascript:') && nextHref !== '#') {
+            const nextUrl = new URL(nextHref, currentUrl).href;
+            if (nextUrl === currentUrl) break;
+            currentUrl = nextUrl;
             pagesFetched++;
           } else {
             if (found === 0 && pagesFetched === 0) {
