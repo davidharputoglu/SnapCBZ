@@ -845,6 +845,7 @@ export async function startDownload(task, win, settings) {
           processedCount++;
           win.webContents.send('download-progress', { 
             id, 
+            status: 'downloading_images',
             progress: (processedCount / totalImages) * 100, 
             downloadedCount,
             currentFile: fileName
@@ -1008,7 +1009,19 @@ export async function startDownload(task, win, settings) {
       const archive = archiver('zip', { zlib: { level: 9 } });
       
       await new Promise((resolve, reject) => {
-        output.on('close', async () => {
+        let isDone = false;
+        
+        const archiveTimeout = setTimeout(() => {
+          if (!isDone) {
+            isDone = true;
+            reject(new Error("La création de l'archive a pris trop de temps (timeout)."));
+          }
+        }, 10 * 60 * 1000); // 10 minutes timeout
+
+        const onComplete = async () => {
+          if (isDone) return;
+          isDone = true;
+          clearTimeout(archiveTimeout);
           try {
             await fs.remove(tempDir);
             win.webContents.send('download-progress', { 
@@ -1022,14 +1035,37 @@ export async function startDownload(task, win, settings) {
           } catch (e) {
             reject(e);
           }
-        });
+        };
+        
+        output.on('close', onComplete);
+        output.on('finish', onComplete);
         
         output.on('error', (err) => {
-          reject(err);
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(archiveTimeout);
+            reject(err);
+          }
         });
         
         archive.on('error', (err) => {
-          reject(err);
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(archiveTimeout);
+            reject(err);
+          }
+        });
+
+        archive.on('warning', (err) => {
+          if (err.code === 'ENOENT') {
+            console.warn('Archiver warning:', err);
+          } else {
+            if (!isDone) {
+              isDone = true;
+              clearTimeout(archiveTimeout);
+              reject(err);
+            }
+          }
         });
 
         archive.on('progress', (progressData) => {
@@ -1044,7 +1080,13 @@ export async function startDownload(task, win, settings) {
         
         archive.pipe(output);
         archive.directory(tempDir, false);
-        archive.finalize();
+        archive.finalize().catch(err => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(archiveTimeout);
+            reject(err);
+          }
+        });
       });
     }
     
