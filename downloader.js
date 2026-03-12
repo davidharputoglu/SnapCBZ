@@ -805,6 +805,7 @@ export async function startDownload(task, win, settings) {
       
       const downloadImage = async (imgUrl, i) => {
         let controller;
+        let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
         try {
           controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
@@ -832,23 +833,22 @@ export async function startDownload(task, win, settings) {
           clearTimeout(timeoutId);
           
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-          const fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
+          fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
           const filePath = path.join(saveDir, fileName);
           
           await fs.writeFile(filePath, Buffer.from(arrayBuffer));
           downloadedCount++;
-          
-          win.webContents.send('download-progress', { 
-            id, 
-            progress: (downloadedCount / totalImages) * 100, 
-            downloadedCount,
-            currentFile: fileName
-          });
         } catch (err) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         } finally {
           processedCount++;
+          win.webContents.send('download-progress', { 
+            id, 
+            progress: (processedCount / totalImages) * 100, 
+            downloadedCount,
+            currentFile: fileName
+          });
         }
       };
 
@@ -936,6 +936,7 @@ export async function startDownload(task, win, settings) {
       
       const downloadImage = async (imgUrl, i) => {
         let controller;
+        let fileName = `page_${String(i + 1).padStart(3, '0')}.jpg`;
         try {
           controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
@@ -963,30 +964,22 @@ export async function startDownload(task, win, settings) {
           clearTimeout(timeoutId);
           
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-          const fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
+          fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
           downloadedCount++;
-          
-          win.webContents.send('download-progress', { 
-            id, 
-            status: 'downloading_images',
-            downloadedCount,
-            totalImages,
-            progress: 10 + ((downloadedCount / totalImages) * 70)
-          });
         } catch (err) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
-          // Still update progress so the bar doesn't get stuck
+        } finally {
+          processedCount++;
           win.webContents.send('download-progress', { 
             id, 
             status: 'downloading_images',
             downloadedCount,
             totalImages,
-            progress: 10 + ((processedCount / totalImages) * 70)
+            progress: 10 + ((processedCount / totalImages) * 70),
+            currentFile: fileName
           });
-        } finally {
-          processedCount++;
         }
       };
 
