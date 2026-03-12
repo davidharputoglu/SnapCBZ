@@ -56,7 +56,7 @@ async function fastFetchHtml(url, existingWin = null) {
     
     return html;
   } catch (err) {
-    return await fetchHtmlWithElectron(url, existingWin);
+    throw err;
   }
 }
 
