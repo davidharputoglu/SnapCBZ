@@ -1006,7 +1006,7 @@ export async function startDownload(task, win, settings) {
       win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
       
       const output = fs.createWriteStream(finalPath);
-      const archive = archiver('zip', { zlib: { level: 9 } });
+      const archive = archiver('zip', { zlib: { level: 0 } });
       
       await new Promise((resolve, reject) => {
         let isDone = false;
