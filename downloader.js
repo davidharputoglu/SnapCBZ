@@ -1018,23 +1018,23 @@ export async function startDownload(task, win, settings) {
           }
         }, 10 * 60 * 1000); // 10 minutes timeout
 
-        const onComplete = async () => {
+        const onComplete = () => {
           if (isDone) return;
           isDone = true;
           clearTimeout(archiveTimeout);
-          try {
-            await fs.remove(tempDir);
-            win.webContents.send('download-progress', { 
-              id, 
-              status: 'completed', 
-              progress: 100, 
-              filename: finalFilename,
-              finalPath: finalPath 
-            });
-            resolve();
-          } catch (e) {
-            reject(e);
-          }
+          
+          // Fire and forget the cleanup to prevent hanging the download process
+          // if files are still locked by the OS or antivirus
+          fs.remove(tempDir).catch(e => console.warn('Failed to remove temp dir (non-critical):', e.message));
+          
+          win.webContents.send('download-progress', { 
+            id, 
+            status: 'completed', 
+            progress: 100, 
+            filename: finalFilename,
+            finalPath: finalPath 
+          });
+          resolve();
         };
         
         output.on('close', onComplete);
