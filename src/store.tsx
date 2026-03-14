@@ -169,7 +169,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
     const handleFetchProgress = (event: any, data: any) => {
       setTasks((prev) => prev.map((t) => 
-        (t.url === data.url && t.status === 'scraping') 
+        (t.id === data.id && t.status === 'scraping') 
           ? { ...t, filename: data.message } 
           : t
       ));

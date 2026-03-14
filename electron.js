@@ -122,7 +122,7 @@ ipcMain.on('cancel-task', (event, taskId) => {
 ipcMain.handle('fetch-gallery-links', async (event, url, taskId) => {
   try {
     return await fetchGalleryLinks(url, taskId, (msg) => {
-      event.sender.send('fetch-gallery-progress', { url, message: msg });
+      event.sender.send('fetch-gallery-progress', { id: taskId, message: msg });
     });
   } catch (error) {
     console.error('Failed to fetch gallery links:', error);
