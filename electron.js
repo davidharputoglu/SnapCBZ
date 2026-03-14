@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
 import contextMenu from 'electron-context-menu';
-import { startDownload, fetchGalleryLinks } from './downloader.js';
+import { startDownload, fetchGalleryLinks, cancelTask } from './downloader.js';
 const { autoUpdater } = pkg;
 
 contextMenu({
@@ -104,9 +104,24 @@ ipcMain.on('start-download', async (event, { task, settings }) => {
   }
 });
 
-ipcMain.handle('fetch-gallery-links', async (event, url) => {
+ipcMain.on('cancel-task', (event, taskId) => {
+  // Check if it's in the queue and remove it
+  const queueIndex = downloadQueue.findIndex(item => item.task.id === taskId);
+  if (queueIndex !== -1) {
+    downloadQueue.splice(queueIndex, 1);
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      win.webContents.send('download-progress', { id: taskId, status: 'error', error: "Téléchargement annulé par l'utilisateur" });
+    }
+  } else {
+    // If it's already running, cancel it
+    cancelTask(taskId);
+  }
+});
+
+ipcMain.handle('fetch-gallery-links', async (event, url, taskId) => {
   try {
-    return await fetchGalleryLinks(url, (msg) => {
+    return await fetchGalleryLinks(url, taskId, (msg) => {
       event.sender.send('fetch-gallery-progress', { url, message: msg });
     });
   } catch (error) {

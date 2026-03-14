@@ -20,12 +20,34 @@ const maxConcurrentScrapers = 3;
 let activeScrapers = 0;
 let scraperQueue = [];
 
-async function fastFetchHtml(url, existingWin = null) {
+export const activeTasks = new Map();
+
+export function cancelTask(taskId) {
+  if (activeTasks.has(taskId)) {
+    const taskState = activeTasks.get(taskId);
+    taskState.isCancelled = true;
+    if (taskState.controllers) {
+      for (const controller of taskState.controllers) {
+        try { controller.abort(); } catch (e) {}
+      }
+    }
+    if (taskState.cancelElectron) {
+      try { taskState.cancelElectron(); } catch (e) {}
+    }
+    if (taskState.scraperWin) {
+      try { taskState.scraperWin.destroy(); } catch (e) {}
+    }
+  }
+}
+
+async function fastFetchHtml(url, existingWin = null, taskState = null) {
   try {
+    if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
     const scraperSession = session.fromPartition('persist:scraper');
     scraperSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
     const controller = new AbortController();
+    if (taskState && taskState.controllers) taskState.controllers.push(controller);
     const timeoutId = setTimeout(() => controller.abort(), 15000);
     
     const fetchPromise = scraperSession.fetch(url, {
@@ -50,8 +72,13 @@ async function fastFetchHtml(url, existingWin = null) {
       new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 15000))
     ]);
     
+    if (taskState && taskState.controllers) {
+      const idx = taskState.controllers.indexOf(controller);
+      if (idx > -1) taskState.controllers.splice(idx, 1);
+    }
+
     if (html.includes('Just a moment') || html.includes('Cloudflare') || html.includes('Verify you are human')) {
-      return await fetchHtmlWithElectron(url, existingWin);
+      return await fetchHtmlWithElectron(url, existingWin, taskState);
     }
     
     return html;
@@ -60,8 +87,9 @@ async function fastFetchHtml(url, existingWin = null) {
   }
 }
 
-async function fetchHtmlWithElectron(url, existingWin = null) {
+async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) {
   const executeFetch = async () => {
+    if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
     // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
     if (!existingWin) {
       try {
@@ -98,6 +126,8 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
     }
 
     return new Promise((resolve, reject) => {
+      if (taskState && taskState.isCancelled) return reject(new Error("Annulé par l'utilisateur"));
+      
       const win = existingWin || new BrowserWindow({
         show: false,
         width: 800,
@@ -117,6 +147,20 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
       let timeElapsed = 0;
 
       let lastState = "";
+      let checkTimeout;
+      
+      if (taskState) {
+        taskState.cancelElectron = () => {
+          if (!resolved) {
+            resolved = true;
+            if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+            clearTimeout(timeout);
+            if (!existingWin) { try { win.destroy(); } catch (e) {} }
+            reject(new Error("Annulé par l'utilisateur"));
+          }
+        };
+      }
+
       const timeout = setTimeout(() => {
         if (!resolved) {
           resolved = true;
@@ -133,7 +177,6 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
         ]);
       };
 
-      let checkTimeout;
       const checkPage = async () => {
         if (resolved) return;
         timeElapsed += 1;
@@ -264,8 +307,10 @@ async function fetchHtmlWithElectron(url, existingWin = null) {
 }
 
 // Helper function to fetch with a strict timeout to prevent hanging
-async function safeGet(url, config = {}) {
+async function safeGet(url, config = {}, taskState = null) {
+  if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
   const controller = new AbortController();
+  if (taskState && taskState.controllers) taskState.controllers.push(controller);
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
   try {
     const getPromise = axiosInstance.get(url, {
@@ -278,6 +323,11 @@ async function safeGet(url, config = {}) {
       new Promise((_, reject) => setTimeout(() => reject(new Error('Axios timeout')), 20000))
     ]);
     
+    if (taskState && taskState.controllers) {
+      const idx = taskState.controllers.indexOf(controller);
+      if (idx > -1) taskState.controllers.splice(idx, 1);
+    }
+    
     clearTimeout(timeoutId);
     return res;
   } catch (err) {
@@ -286,9 +336,16 @@ async function safeGet(url, config = {}) {
   }
 }
 
-export async function fetchGalleryLinks(url, onProgress = null) {
+export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
   let scraperWin = null;
+  const taskState = { isCancelled: false, controllers: [], scraperWin: null };
+  if (taskId) activeTasks.set(taskId, taskState);
+
   try {
+    const checkCancelled = () => {
+      if (taskState.isCancelled) throw new Error("Analyse annulée par l'utilisateur");
+    };
+
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     const links = [];
@@ -310,14 +367,16 @@ export async function fetchGalleryLinks(url, onProgress = null) {
             partition: 'persist:scraper'
           }
         });
+        taskState.scraperWin = scraperWin;
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          checkCancelled();
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
           
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
-          const html = await fastFetchHtml(currentUrl, scraperWin);
+          const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
           const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -407,14 +466,16 @@ export async function fetchGalleryLinks(url, onProgress = null) {
             partition: 'persist:scraper'
           }
         });
+        taskState.scraperWin = scraperWin;
         scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
         while (currentUrl && pagesFetched < 50) {
+          checkCancelled();
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
           
           if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
-          const html = await fastFetchHtml(currentUrl, scraperWin);
+          const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
           const $ = cheerio.load(html);
           let found = 0;
           $('.gallery a.cover').each((i, el) => {
@@ -460,11 +521,20 @@ export async function fetchGalleryLinks(url, onProgress = null) {
     }
     console.error("Error fetching gallery links:", error.message);
     throw error;
+  } finally {
+    if (taskId) activeTasks.delete(taskId);
   }
 }
 
 export async function startDownload(task, win, settings) {
+  const taskState = { isCancelled: false, controllers: [] };
+  activeTasks.set(task.id, taskState);
+
   try {
+    const checkCancelled = () => {
+      if (taskState.isCancelled) throw new Error("Téléchargement annulé par l'utilisateur");
+    };
+
     const { id, url, type, category, language, copyright, character } = task;
     
     win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: 'Analyse du site...' });
@@ -478,20 +548,21 @@ export async function startDownload(task, win, settings) {
     const hostname = urlObj.hostname;
 
     try {
+      checkCancelled();
       if (hostname.includes('rule34.xxx')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await safeGet(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
+        const apiRes = await safeGet(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState);
         if (apiRes.data && Array.isArray(apiRes.data)) {
           imageUrls = apiRes.data.map(p => p.file_url);
         }
       } else if (hostname.includes('gelbooru.com')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await safeGet(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`);
+        const apiRes = await safeGet(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState);
         if (apiRes.data && apiRes.data.post) {
           imageUrls = apiRes.data.post.map(p => p.file_url);
         }
       } else if (hostname.includes('rule34.paheal.net')) {
-        const res = await safeGet(url);
+        const res = await safeGet(url, {}, taskState);
         const $ = cheerio.load(res.data);
         $('.shm-thumb').each((i, el) => {
           let src = $(el).find('img').attr('src');
@@ -505,7 +576,7 @@ export async function startDownload(task, win, settings) {
         if (match) {
           const galleryId = match[1];
           try {
-            const html = await fastFetchHtml(url);
+            const html = await fastFetchHtml(url, null, taskState);
             const $ = cheerio.load(html);
             
             let galleryData = null;
@@ -589,7 +660,7 @@ export async function startDownload(task, win, settings) {
           }
         }
       } else if (hostname.includes('3hentai.net')) {
-        const res = await safeGet(url);
+        const res = await safeGet(url, {}, taskState);
         const $ = cheerio.load(res.data);
         title = $('title').text().replace(' - 3hentai', '').trim();
         
@@ -642,7 +713,7 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
-        const html = await fastFetchHtml(url);
+        const html = await fastFetchHtml(url, null, taskState);
         const $ = cheerio.load(html);
         title = $('h1').text().trim();
         
@@ -804,10 +875,12 @@ export async function startDownload(task, win, settings) {
       let processedCount = 0;
       
       const downloadImage = async (imgUrl, i) => {
+        checkCancelled();
         let controller;
         let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
         try {
           controller = new AbortController();
+          taskState.controllers.push(controller);
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
@@ -820,9 +893,9 @@ export async function startDownload(task, win, settings) {
             new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
           ]);
           
-          if (!imgRes.ok) {
+          if (!imgRes || !imgRes.ok) {
             clearTimeout(timeoutId);
-            throw new Error(`HTTP error! status: ${imgRes.status}`);
+            throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
           }
           
           const bufferPromise = imgRes.arrayBuffer().catch(() => {});
@@ -831,6 +904,8 @@ export async function startDownload(task, win, settings) {
             new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
           ]);
           clearTimeout(timeoutId);
+          
+          if (!arrayBuffer) throw new Error('Empty buffer');
           
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
@@ -842,6 +917,8 @@ export async function startDownload(task, win, settings) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         } finally {
+          const idx = taskState.controllers.indexOf(controller);
+          if (idx > -1) taskState.controllers.splice(idx, 1);
           processedCount++;
           win.webContents.send('download-progress', { 
             id, 
@@ -936,10 +1013,12 @@ export async function startDownload(task, win, settings) {
       let processedCount = 0;
       
       const downloadImage = async (imgUrl, i) => {
+        checkCancelled();
         let controller;
         let fileName = `page_${String(i + 1).padStart(3, '0')}.jpg`;
         try {
           controller = new AbortController();
+          taskState.controllers.push(controller);
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
@@ -952,9 +1031,9 @@ export async function startDownload(task, win, settings) {
             new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
           ]);
           
-          if (!imgRes.ok) {
+          if (!imgRes || !imgRes.ok) {
             clearTimeout(timeoutId);
-            throw new Error(`HTTP error! status: ${imgRes.status}`);
+            throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
           }
           
           const bufferPromise = imgRes.arrayBuffer().catch(() => {});
@@ -964,6 +1043,8 @@ export async function startDownload(task, win, settings) {
           ]);
           clearTimeout(timeoutId);
           
+          if (!arrayBuffer) throw new Error('Empty buffer');
+          
           const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
           fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
@@ -972,6 +1053,8 @@ export async function startDownload(task, win, settings) {
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
         } finally {
+          const idx = taskState.controllers.indexOf(controller);
+          if (idx > -1) taskState.controllers.splice(idx, 1);
           processedCount++;
           win.webContents.send('download-progress', { 
             id, 
@@ -1018,10 +1101,25 @@ export async function startDownload(task, win, settings) {
           }
         }, 10 * 60 * 1000); // 10 minutes timeout
 
+        // Add cancellation handler for archiving phase
+        const cancelInterval = setInterval(() => {
+          if (taskState.isCancelled && !isDone) {
+            isDone = true;
+            clearTimeout(archiveTimeout);
+            clearInterval(cancelInterval);
+            archive.abort();
+            output.destroy();
+            fs.remove(tempDir).catch(() => {});
+            fs.remove(finalPath).catch(() => {});
+            reject(new Error("Téléchargement annulé par l'utilisateur"));
+          }
+        }, 1000);
+
         const onComplete = () => {
           if (isDone) return;
           isDone = true;
           clearTimeout(archiveTimeout);
+          clearInterval(cancelInterval);
           
           // Fire and forget the cleanup to prevent hanging the download process
           // if files are still locked by the OS or antivirus
@@ -1044,6 +1142,7 @@ export async function startDownload(task, win, settings) {
           if (!isDone) {
             isDone = true;
             clearTimeout(archiveTimeout);
+            clearInterval(cancelInterval);
             reject(err);
           }
         });
@@ -1052,6 +1151,7 @@ export async function startDownload(task, win, settings) {
           if (!isDone) {
             isDone = true;
             clearTimeout(archiveTimeout);
+            clearInterval(cancelInterval);
             reject(err);
           }
         });
@@ -1063,6 +1163,7 @@ export async function startDownload(task, win, settings) {
             if (!isDone) {
               isDone = true;
               clearTimeout(archiveTimeout);
+              clearInterval(cancelInterval);
               reject(err);
             }
           }
@@ -1084,6 +1185,7 @@ export async function startDownload(task, win, settings) {
           if (!isDone) {
             isDone = true;
             clearTimeout(archiveTimeout);
+            clearInterval(cancelInterval);
             reject(err);
           }
         });
@@ -1093,5 +1195,7 @@ export async function startDownload(task, win, settings) {
   } catch (error) {
     console.error('Download error:', error);
     win.webContents.send('download-progress', { id, status: 'error', error: error.message });
+  } finally {
+    activeTasks.delete(task.id);
   }
 }

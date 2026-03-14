@@ -59,6 +59,7 @@ interface AppState {
   addTask: (url: string, type?: "cbz" | "images") => void;
   addTasks: (urls: string[], type?: "cbz" | "images") => void;
   removeTask: (id: string) => void;
+  cancelTask: (id: string) => void;
   clearCompleted: () => void;
 }
 
@@ -239,7 +240,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           }, ...prev]);
 
           try {
-            const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url);
+            const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url, tempId);
             
             // Remove the temporary task
             setTasks((prev) => prev.filter(t => t.id !== tempId));
@@ -335,6 +336,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const removeTask = (id: string) => {
     setTasks((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const cancelTask = (id: string) => {
+    if (ipcRenderer) {
+      ipcRenderer.send("cancel-task", id);
+    } else {
+      setTasks((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, status: "error", error: "Téléchargement annulé par l'utilisateur" } : t)),
+      );
+    }
   };
 
   const clearCompleted = () => {
@@ -449,6 +460,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         addTask,
         addTasks,
         removeTask,
+        cancelTask,
         clearCompleted,
       }}
     >

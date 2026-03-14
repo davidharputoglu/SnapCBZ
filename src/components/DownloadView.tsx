@@ -9,12 +9,13 @@ import {
   Trash2,
   Globe2,
   FolderOpen,
+  XCircle,
 } from "lucide-react";
 import { useAppStore, DownloadTask } from "../store";
 import { useTranslation } from "../translations";
 
 export const DownloadView: React.FC = () => {
-  const { tasks, addTasks, removeTask, clearCompleted } = useAppStore();
+  const { tasks, addTasks, removeTask, cancelTask, clearCompleted } = useAppStore();
   const { t } = useTranslation();
   const [urls, setUrls] = useState("");
   const [mode, setMode] = useState<"cbz" | "images">("cbz");
@@ -123,6 +124,7 @@ export const DownloadView: React.FC = () => {
               key={task.id}
               task={task}
               onRemove={() => removeTask(task.id)}
+              onCancel={() => cancelTask(task.id)}
             />
           ))
         )}
@@ -131,9 +133,10 @@ export const DownloadView: React.FC = () => {
   );
 };
 
-const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
+const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: () => void }> = ({
   task,
   onRemove,
+  onCancel,
 }) => {
   const { settings } = useAppStore();
   const { t } = useTranslation();
@@ -233,13 +236,23 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void }> = ({
           <span className="text-sm font-bold text-foreground min-w-[3rem] text-right">
             {Math.round(task.progress)}%
           </span>
-          <button
-            onClick={onRemove}
-            className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-            title="Remove task"
-          >
-            <Trash2 className="w-5 h-5" />
-          </button>
+          {task.status !== "completed" && task.status !== "error" && task.status !== "ignored" ? (
+            <button
+              onClick={onCancel}
+              className="p-2 text-muted-foreground hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-950/30 rounded-lg transition-colors"
+              title="Cancel task"
+            >
+              <XCircle className="w-5 h-5" />
+            </button>
+          ) : (
+            <button
+              onClick={onRemove}
+              className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+              title="Remove task"
+            >
+              <Trash2 className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 
