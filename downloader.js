@@ -884,7 +884,10 @@ export async function startDownload(task, win, settings) {
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-            headers: { 'Referer': url },
+            headers: { 
+              'Referer': url,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
             signal: controller.signal
           }).catch(() => {});
           
@@ -920,13 +923,20 @@ export async function startDownload(task, win, settings) {
           const idx = taskState.controllers.indexOf(controller);
           if (idx > -1) taskState.controllers.splice(idx, 1);
           processedCount++;
-          win.webContents.send('download-progress', { 
-            id, 
-            status: 'downloading_images',
-            progress: (processedCount / totalImages) * 100, 
-            downloadedCount,
-            currentFile: fileName
-          });
+          
+          const now = Date.now();
+          if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
+          
+          if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
+            taskState.lastProgressTime = now;
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'downloading_images',
+              progress: (processedCount / totalImages) * 100, 
+              downloadedCount,
+              currentFile: fileName
+            });
+          }
         }
       };
 
@@ -1022,7 +1032,10 @@ export async function startDownload(task, win, settings) {
           const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-            headers: { 'Referer': url },
+            headers: { 
+              'Referer': url,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            },
             signal: controller.signal
           }).catch(() => {});
           
@@ -1056,14 +1069,21 @@ export async function startDownload(task, win, settings) {
           const idx = taskState.controllers.indexOf(controller);
           if (idx > -1) taskState.controllers.splice(idx, 1);
           processedCount++;
-          win.webContents.send('download-progress', { 
-            id, 
-            status: 'downloading_images',
-            downloadedCount,
-            totalImages,
-            progress: 10 + ((processedCount / totalImages) * 70),
-            currentFile: fileName
-          });
+          
+          const now = Date.now();
+          if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
+          
+          if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
+            taskState.lastProgressTime = now;
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'downloading_images',
+              downloadedCount,
+              totalImages,
+              progress: 10 + ((processedCount / totalImages) * 70),
+              currentFile: fileName
+            });
+          }
         }
       };
 
@@ -1169,14 +1189,19 @@ export async function startDownload(task, win, settings) {
           }
         });
 
+        let lastArchiveProgressTime = 0;
         archive.on('progress', (progressData) => {
-          // Use downloadedCount as the absolute total since entries.total grows dynamically
-          const percent = 80 + ((progressData.entries.processed / downloadedCount) * 20);
-          win.webContents.send('download-progress', { 
-            id, 
-            status: 'converting', 
-            progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
-          });
+          const now = Date.now();
+          if (now - lastArchiveProgressTime > 100 || progressData.entries.processed === downloadedCount) {
+            lastArchiveProgressTime = now;
+            // Use downloadedCount as the absolute total since entries.total grows dynamically
+            const percent = 80 + ((progressData.entries.processed / downloadedCount) * 20);
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'converting', 
+              progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
+            });
+          }
         });
         
         archive.pipe(output);
