@@ -141,6 +141,59 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
   const { settings } = useAppStore();
   const { t } = useTranslation();
 
+  const translateDynamicString = (str: string | undefined) => {
+    if (!str) return "";
+    if (str === "Language not configured") return t("error_lang_not_configured" as any);
+    if (str === "Cancelled by user") return t("error_cancelled" as any);
+    if (str === "Scraping cancelled by user") return t("error_scraping_cancelled" as any);
+    if (str === "Download cancelled by user") return t("error_dl_cancelled" as any);
+    if (str === "Cloudflare window closed by user") return t("error_cf_closed" as any);
+    if (str === "No images found on this page.") return t("error_no_images" as any);
+    if (str === "Cannot download images. The site blocks access or requires a Referer.") return t("error_dl_blocked" as any);
+    if (str === "Scraping site...") return t("status_scraping_site" as any);
+    if (str === "Please wait or solve the captcha if necessary...") return t("cf_wait" as any);
+    
+    if (str === "Empty buffer") return t("error_empty_buffer" as any);
+    
+    if (str === "Unknown") return t("status_unknown" as any);
+    if (str === "Gallery") return t("status_gallery" as any);
+    if (str === "Analyzing links & filtering...") return t("status_analyzing" as any);
+    
+    const downloadingImagesMatch = str.match(/^Downloading images for: (.*)$/);
+    if (downloadingImagesMatch) return t("status_downloading_images_tag" as any, { tag: downloadingImagesMatch[1] });
+
+    const galleryFromMatch = str.match(/^Gallery from (.*)$/);
+    if (galleryFromMatch) return t("status_gallery_from" as any, { hostname: galleryFromMatch[1] });
+
+    const imagesMatch = str.match(/^Images: (.*)$/);
+    if (imagesMatch) return t("status_images" as any, { name: imagesMatch[1] === 'Unknown' ? t("status_unknown" as any) : imagesMatch[1] });
+
+    if (str === "No links found. Cloudflare might have blocked access or the page is empty.") return t("error_no_links_cf" as any);
+    
+    const parseErrorMatch = str.match(/^Parse error: (.*)$/);
+    if (parseErrorMatch) return t("error_parse" as any, { path: parseErrorMatch[1] });
+
+    const httpErrorMatch = str.match(/^HTTP error! status: (.*)$/);
+    if (httpErrorMatch) return t("error_http" as any, { status: httpErrorMatch[1] });
+
+    const siteErrorMatch = str.match(/^Site error: (.*)$/);
+    if (siteErrorMatch) return t("error_site" as any, { title: siteErrorMatch[1] });
+    
+    const nhentaiErrorMatch = str.match(/^Error parsing nhentai\.net: (.*)$/);
+    if (nhentaiErrorMatch) return t("error_nhentai" as any, { message: nhentaiErrorMatch[1] });
+    
+    const noLinksMatch = str.match(/^No links found\. Title: "(.*)"\. Content: "(.*)"$/);
+    if (noLinksMatch) return t("error_no_links" as any, { title: noLinksMatch[1], content: noLinksMatch[2] });
+    
+    const cf403Match = str.match(/^Access denied \(Error 403\)\. The site (.*) uses Cloudflare protection which blocks the application\.$/);
+    if (cf403Match) return t("error_403_cf" as any, { hostname: cf403Match[1] });
+    
+    const scrapingPageMatch = str.match(/^Scraping links \(page (\d+)\)\.\.\.$/);
+    if (scrapingPageMatch) return t("status_scraping_page" as any, { page: scrapingPageMatch[1] });
+    
+    return str;
+  };
+
   const getStatusIcon = () => {
     switch (task.status) {
       case "completed":
@@ -174,7 +227,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
       case "error":
         return t("status_error");
       case "ignored":
-        return "Ignoré";
+        return t("status_ignored" as any);
     }
   };
 
@@ -200,9 +253,9 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
           <div>
             <h3
               className="font-semibold text-foreground truncate max-w-md"
-              title={task.filename}
+              title={translateDynamicString(task.filename)}
             >
-              {task.filename}
+              {translateDynamicString(task.filename)}
             </h3>
             <div className="flex items-center gap-2 text-sm text-muted-foreground mt-1">
               <span>{getStatusText()}</span>
@@ -278,7 +331,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
 
         {(task.status === "error" || task.status === "ignored") && task.error && (
           <div className="text-xs text-red-500 bg-red-50 dark:bg-red-950/30 p-2 rounded-lg">
-            {task.error}
+            {translateDynamicString(task.error)}
           </div>
         )}
       </div>

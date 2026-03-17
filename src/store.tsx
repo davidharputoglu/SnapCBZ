@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from "react";
+import { translations, AppLanguage } from "./translations";
 const { ipcRenderer } = window.require ? window.require("electron") : { ipcRenderer: null };
 
 export interface CustomLanguage {
@@ -93,6 +94,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return saved ? JSON.parse(saved) : defaultSettings;
   });
 
+  const getTranslation = (key: keyof typeof translations.en) => {
+    const lang = (settings.appLanguage as AppLanguage) || "en";
+    return translations[lang]?.[key] || translations.en[key] || key;
+  };
+
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
   const settingsRef = useRef(settings);
 
@@ -103,7 +109,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (e) {
       console.error("Failed to save settings to localStorage", e);
       if (e instanceof DOMException && e.name === "QuotaExceededError") {
-        alert("Image is too large to save in settings. Please choose a smaller image.");
+        alert(getTranslation("alert_image_too_large" as any));
         setSettings((prev) => ({ ...prev, lightWallpaper: null }));
       }
     }
@@ -160,7 +166,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setTasks((prev) => {
         // If the language is ignored, mark it as ignored so the user understands why it was skipped
         if (data.status === 'ignored_language') {
-          return prev.map((t) => (t.id === data.id ? { ...t, ...data, status: 'ignored', error: 'Langue non configurée' } : t));
+          return prev.map((t) => (t.id === data.id ? { ...t, ...data, status: 'ignored', error: "Language not configured" } : t));
         }
         
         return prev.map((t) => (t.id === data.id ? { ...t, ...data } : t));
@@ -234,7 +240,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             id: tempId,
             url,
             type: "cbz",
-            filename: "Analyse des liens & filtrage...",
+            filename: "Analyzing links & filtering...",
             status: "scraping",
             progress: 0,
           }, ...prev]);
@@ -255,10 +261,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
                 id,
                 url,
                 type: "cbz",
-                filename: `Erreur d'analyse: ${new URL(url).pathname}`,
+                filename: `Parse error: ${new URL(url).pathname}`,
                 status: "error",
                 progress: 0,
-                error: "Aucun lien trouvé. Cloudflare a peut-être bloqué l'accès ou la page est vide."
+                error: "No links found. Cloudflare might have blocked access or the page is empty."
               }, ...prev]);
             }
           } catch (e: any) {
@@ -276,7 +282,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
               id,
               url,
               type: "cbz",
-              filename: `Erreur d'analyse: ${new URL(url).pathname}`,
+              filename: `Parse error: ${new URL(url).pathname}`,
               status: "error",
               progress: 0,
               error: errorMessage
@@ -343,7 +349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       ipcRenderer.send("cancel-task", id);
     } else {
       setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, status: "error", error: "Téléchargement annulé par l'utilisateur" } : t)),
+        prev.map((t) => (t.id === id ? { ...t, status: "error", error: "Download cancelled by user" } : t)),
       );
     }
   };

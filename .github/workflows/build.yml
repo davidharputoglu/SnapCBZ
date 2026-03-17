@@ -12,6 +12,8 @@ permissions:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     strategy:
       fail-fast: false # Empêche l'annulation de Windows si Linux plante
       matrix:

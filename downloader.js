@@ -42,7 +42,7 @@ export function cancelTask(taskId) {
 
 async function fastFetchHtml(url, existingWin = null, taskState = null) {
   try {
-    if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
+    if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     const scraperSession = session.fromPartition('persist:scraper');
     scraperSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     
@@ -89,7 +89,7 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
 
 async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) {
   const executeFetch = async () => {
-    if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
+    if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
     if (!existingWin) {
       try {
@@ -126,7 +126,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
     }
 
     return new Promise((resolve, reject) => {
-      if (taskState && taskState.isCancelled) return reject(new Error("Annulé par l'utilisateur"));
+      if (taskState && taskState.isCancelled) return reject(new Error("Cancelled by user"));
       
       const win = existingWin || new BrowserWindow({
         show: false,
@@ -156,7 +156,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
             if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
             clearTimeout(timeout);
             if (!existingWin) { try { win.destroy(); } catch (e) {} }
-            reject(new Error("Annulé par l'utilisateur"));
+            reject(new Error("Cancelled by user"));
           }
         };
       }
@@ -190,7 +190,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
               clearTimeout(checkTimeout);
               clearTimeout(timeout);
               if (!existingWin) { try { win.destroy(); } catch (e) {} }
-              reject(new Error(`Erreur du site: ${title}`));
+              reject(new Error(`Site error: ${title}`));
             }
             return;
           }
@@ -208,7 +208,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
           // Show window if we detect Cloudflare OR if it's taking too long (might be an unknown captcha)
           if ((cloudflareTime > 2 || timeElapsed > 5) && !win.isVisible()) {
             win.show();
-            win.setTitle("Veuillez patienter ou résoudre le captcha si nécessaire...");
+            win.setTitle("Please wait or solve the captcha if necessary...");
           }
 
           if (isCloudflare) {
@@ -251,7 +251,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
             resolved = true;
             clearTimeout(checkTimeout);
             clearTimeout(timeout);
-            reject(new Error("Fenêtre Cloudflare fermée par l'utilisateur"));
+            reject(new Error("Cloudflare window closed by user"));
           }
         });
       }
@@ -308,7 +308,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
 
 // Helper function to fetch with a strict timeout to prevent hanging
 async function safeGet(url, config = {}, taskState = null) {
-  if (taskState && taskState.isCancelled) throw new Error("Annulé par l'utilisateur");
+  if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
@@ -343,7 +343,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
 
   try {
     const checkCancelled = () => {
-      if (taskState.isCancelled) throw new Error("Analyse annulée par l'utilisateur");
+      if (taskState.isCancelled) throw new Error("Scraping cancelled by user");
     };
 
     const urlObj = new URL(url);
@@ -375,7 +375,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
           
-          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
+          if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
           const $ = cheerio.load(html);
           let found = 0;
@@ -402,7 +402,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
             if (found === 0 && pagesFetched === 0) {
               const title = $('title').text().trim();
               const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
-              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+              throw new Error(`No links found. Title: "${title}". Content: "${bodySnippet}"`);
             }
             currentUrl = null;
           }
@@ -417,7 +417,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
           
-          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
+          if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           const res = await safeGet(currentUrl);
           const $ = cheerio.load(res.data);
           let found = 0;
@@ -444,7 +444,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
             if (found === 0 && pagesFetched === 0) {
               const title = $('title').text().trim();
               const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
-              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+              throw new Error(`No links found. Title: "${title}". Content: "${bodySnippet}"`);
             }
             currentUrl = null;
           }
@@ -474,7 +474,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
           
-          if (onProgress) onProgress(`Analyse des liens (page ${pagesFetched + 1})...`);
+          if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
           const $ = cheerio.load(html);
           let found = 0;
@@ -501,7 +501,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
             if (found === 0 && pagesFetched === 0) {
               const title = $('title').text().trim();
               const bodySnippet = $('body').text().replace(/\s+/g, ' ').trim().substring(0, 100);
-              throw new Error(`Aucun lien trouvé. Titre: "${title}". Contenu: "${bodySnippet}"`);
+              throw new Error(`No links found. Title: "${title}". Content: "${bodySnippet}"`);
             }
             currentUrl = null;
           }
@@ -532,12 +532,12 @@ export async function startDownload(task, win, settings) {
 
   try {
     const checkCancelled = () => {
-      if (taskState.isCancelled) throw new Error("Téléchargement annulé par l'utilisateur");
+      if (taskState.isCancelled) throw new Error("Download cancelled by user");
     };
 
     const { id, url, type, category, language, copyright, character } = task;
     
-    win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: 'Analyse du site...' });
+    win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Scraping site..." });
     
     let imageUrls = [];
     let title = 'Gallery';
@@ -656,7 +656,7 @@ export async function startDownload(task, win, settings) {
             }
           } catch (apiError) {
             console.error("nhentai scraping failed:", apiError.message);
-            throw new Error(`Erreur lors de l'analyse de nhentai.net: ${apiError.message}`);
+            throw new Error(`Error parsing nhentai.net: ${apiError.message}`);
           }
         }
       } else if (hostname.includes('3hentai.net')) {
@@ -809,7 +809,7 @@ export async function startDownload(task, win, settings) {
     } catch (scrapeError) {
       console.error("Scraping specific error:", scrapeError.message);
       if (scrapeError.response && scrapeError.response.status === 403) {
-        throw new Error(`Accès refusé (Erreur 403). Le site ${hostname} utilise une protection Cloudflare qui bloque l'application.`);
+        throw new Error(`Access denied (Error 403). The site ${hostname} uses Cloudflare protection which blocks the application.`);
       }
     }
 
@@ -841,7 +841,7 @@ export async function startDownload(task, win, settings) {
     const uniqueImages = [...new Set(imageUrls)];
     
     if (uniqueImages.length === 0) {
-      throw new Error('Aucune image trouvée sur cette page.');
+      throw new Error("No images found on this page.");
     }
 
     // Get cookies from the scraper session to bypass Cloudflare for image downloads
@@ -956,7 +956,7 @@ export async function startDownload(task, win, settings) {
       await Promise.all(workers);
       
       if (downloadedCount === 0) {
-        throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
+        throw new Error("Cannot download images. The site blocks access or requires a Referer.");
       }
       
       win.webContents.send('download-progress', { 
@@ -1103,7 +1103,7 @@ export async function startDownload(task, win, settings) {
       await Promise.all(workers);
       
       if (downloadedCount === 0) {
-        throw new Error("Impossible de télécharger les images. Le site bloque l'accès ou nécessite un Referer.");
+        throw new Error("Cannot download images. The site blocks access or requires a Referer.");
       }
       
       win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
@@ -1131,7 +1131,7 @@ export async function startDownload(task, win, settings) {
             output.destroy();
             fs.remove(tempDir).catch(() => {});
             fs.remove(finalPath).catch(() => {});
-            reject(new Error("Téléchargement annulé par l'utilisateur"));
+            reject(new Error("Download cancelled by user"));
           }
         }, 1000);
 
