@@ -20,6 +20,9 @@ const maxConcurrentScrapers = 3;
 let activeScrapers = 0;
 let scraperQueue = [];
 
+let activeElectronScrapers = 0;
+let electronScraperQueue = [];
+
 export const activeTasks = new Map();
 
 export function cancelTask(taskId) {
@@ -283,25 +286,25 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
 
   return new Promise((resolve, reject) => {
     const task = async () => {
-      activeScrapers++;
+      activeElectronScrapers++;
       try {
         const result = await executeFetch();
         resolve(result);
       } catch (e) {
         reject(e);
       } finally {
-        activeScrapers--;
-        if (scraperQueue.length > 0) {
-          const nextTask = scraperQueue.shift();
+        activeElectronScrapers--;
+        if (electronScraperQueue.length > 0) {
+          const nextTask = electronScraperQueue.shift();
           nextTask();
         }
       }
     };
 
-    if (activeScrapers < maxConcurrentScrapers) {
+    if (activeElectronScrapers < maxConcurrentScrapers) {
       task();
     } else {
-      scraperQueue.push(task);
+      electronScraperQueue.push(task);
     }
   });
 }
@@ -811,6 +814,7 @@ export async function startDownload(task, win, settings) {
       if (scrapeError.response && scrapeError.response.status === 403) {
         throw new Error(`Access denied (Error 403). The site ${hostname} uses Cloudflare protection which blocks the application.`);
       }
+      throw scrapeError;
     }
 
     // Generic fallback
@@ -1204,16 +1208,25 @@ export async function startDownload(task, win, settings) {
           }
         });
         
-        archive.pipe(output);
-        archive.directory(tempDir, false);
-        archive.finalize().catch(err => {
+        try {
+          archive.pipe(output);
+          archive.directory(tempDir, false);
+          archive.finalize().catch(err => {
+            if (!isDone) {
+              isDone = true;
+              clearTimeout(archiveTimeout);
+              clearInterval(cancelInterval);
+              reject(err);
+            }
+          });
+        } catch (err) {
           if (!isDone) {
             isDone = true;
             clearTimeout(archiveTimeout);
             clearInterval(cancelInterval);
             reject(err);
           }
-        });
+        }
       });
     }
     
