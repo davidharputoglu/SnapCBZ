@@ -52,15 +52,35 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
       try {
         const currentUrl = await existingWin.webContents.executeJavaScript('window.location.href');
         if (currentUrl && currentUrl !== 'about:blank' && new URL(currentUrl).origin === new URL(url).origin) {
-          const html = await existingWin.webContents.executeJavaScript(`
-            fetch('${url}', {
-              headers: {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Referer': 'https://google.com/'
-              }
-            }).then(res => res.text())
+          const htmlPromise = existingWin.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 15000);
+              fetch('${url}', {
+                headers: {
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                  'Accept-Language': 'en-US,en;q=0.5',
+                  'Referer': 'https://google.com/'
+                },
+                signal: controller.signal
+              })
+              .then(res => {
+                clearTimeout(timeoutId);
+                return res.text();
+              })
+              .then(resolve)
+              .catch(err => {
+                clearTimeout(timeoutId);
+                reject(err);
+              });
+            })
           `);
+          
+          const html = await Promise.race([
+            htmlPromise,
+            new Promise((_, reject) => setTimeout(() => reject(new Error('executeJavaScript timeout')), 16000))
+          ]);
+          
           if (html && !html.includes('Just a moment') && !html.includes('Cloudflare') && !html.includes('Verify you are human')) {
             return html;
           }
@@ -906,11 +926,23 @@ export async function startDownload(task, win, settings) {
         checkCancelled();
         let controller;
         let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
-        let currentErr = null;
+        if (retries < 3) {
+          fileName = `image_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+        }
+        let success = false;
         try {
+          // Send progress update to show which file is currently being downloaded/retried
+          win.webContents.send('download-progress', { 
+            id, 
+            status: 'downloading_images',
+            progress: (processedCount / totalImages) * 100, 
+            downloadedCount,
+            currentFile: fileName
+          });
+
           controller = new AbortController();
           taskState.controllers.push(controller);
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 
@@ -922,7 +954,7 @@ export async function startDownload(task, win, settings) {
           
           const imgRes = await Promise.race([
             fetchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
           ]);
           
           if (!imgRes || !imgRes.ok) {
@@ -933,7 +965,7 @@ export async function startDownload(task, win, settings) {
           const bufferPromise = imgRes.arrayBuffer().catch(() => {});
           const arrayBuffer = await Promise.race([
             bufferPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
           ]);
           clearTimeout(timeoutId);
           
@@ -945,8 +977,8 @@ export async function startDownload(task, win, settings) {
           
           await fs.writeFile(filePath, Buffer.from(arrayBuffer));
           downloadedCount++;
+          success = true;
         } catch (err) {
-          currentErr = err;
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
           if (retries > 0 && !taskState.isCancelled) {
@@ -957,9 +989,10 @@ export async function startDownload(task, win, settings) {
             return downloadImage(imgUrl, i, retries - 1);
           }
         } finally {
-          if (retries === 3 || (retries < 3 && currentErr)) {
-            const idx = taskState.controllers.indexOf(controller);
-            if (idx > -1) taskState.controllers.splice(idx, 1);
+          const idx = taskState.controllers.indexOf(controller);
+          if (idx > -1) taskState.controllers.splice(idx, 1);
+          
+          if (success || retries === 0 || taskState.isCancelled) {
             processedCount++;
             
             const now = Date.now();
@@ -1065,11 +1098,24 @@ export async function startDownload(task, win, settings) {
         checkCancelled();
         let controller;
         let fileName = `page_${String(i + 1).padStart(3, '0')}.jpg`;
-        let currentErr = null;
+        if (retries < 3) {
+          fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+        }
+        let success = false;
         try {
+          // Send progress update to show which file is currently being downloaded/retried
+          win.webContents.send('download-progress', { 
+            id, 
+            status: 'downloading_images',
+            downloadedCount,
+            totalImages,
+            progress: 10 + ((processedCount / totalImages) * 70),
+            currentFile: fileName
+          });
+
           controller = new AbortController();
           taskState.controllers.push(controller);
-          const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 seconds strict timeout
+          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
           
           const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
             headers: { 
@@ -1081,7 +1127,7 @@ export async function startDownload(task, win, settings) {
           
           const imgRes = await Promise.race([
             fetchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
           ]);
           
           if (!imgRes || !imgRes.ok) {
@@ -1092,7 +1138,7 @@ export async function startDownload(task, win, settings) {
           const bufferPromise = imgRes.arrayBuffer().catch(() => {});
           const arrayBuffer = await Promise.race([
             bufferPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 15000))
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
           ]);
           clearTimeout(timeoutId);
           
@@ -1102,8 +1148,8 @@ export async function startDownload(task, win, settings) {
           fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
           await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
           downloadedCount++;
+          success = true;
         } catch (err) {
-          currentErr = err;
           if (controller) controller.abort();
           console.error(`Failed to download image ${imgUrl}:`, err.message);
           if (retries > 0 && !taskState.isCancelled) {
@@ -1114,9 +1160,11 @@ export async function startDownload(task, win, settings) {
             return downloadImage(imgUrl, i, retries - 1);
           }
         } finally {
-          if (retries === 3 || (retries < 3 && currentErr)) { // Only increment processedCount on final attempt
-            const idx = taskState.controllers.indexOf(controller);
-            if (idx > -1) taskState.controllers.splice(idx, 1);
+          const idx = taskState.controllers.indexOf(controller);
+          if (idx > -1) taskState.controllers.splice(idx, 1);
+          
+          // Only increment processedCount if this is the final attempt (success or no more retries)
+          if (success || retries === 0 || taskState.isCancelled) {
             processedCount++;
             
             const now = Date.now();
