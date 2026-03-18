@@ -922,16 +922,90 @@ export async function startDownload(task, win, settings) {
       let downloadedCount = 0;
       let processedCount = 0;
       
-      const downloadImage = async (imgUrl, i, retries = 3) => {
+      const downloadImage = async (imgUrl, i) => {
         checkCancelled();
-        let controller;
-        let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
-        if (retries < 3) {
-          fileName = `image_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
-        }
         let success = false;
-        try {
-          // Send progress update to show which file is currently being downloaded/retried
+        let retries = 3;
+        let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
+        
+        while (retries >= 0 && !success && !taskState.isCancelled) {
+          let controller;
+          try {
+            if (retries < 3) {
+              fileName = `image_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+            }
+            
+            // Send progress update to show which file is currently being downloaded/retried
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'downloading_images',
+              progress: (processedCount / totalImages) * 100, 
+              downloadedCount,
+              currentFile: fileName
+            });
+
+            controller = new AbortController();
+            taskState.controllers.push(controller);
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
+            
+            const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
+              headers: { 
+                'Referer': url,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              },
+              signal: controller.signal
+            }).catch(() => {});
+            
+            const imgRes = await Promise.race([
+              fetchPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
+            ]);
+            
+            if (!imgRes || !imgRes.ok) {
+              clearTimeout(timeoutId);
+              throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
+            }
+            
+            const bufferPromise = imgRes.arrayBuffer().catch(() => {});
+            const arrayBuffer = await Promise.race([
+              bufferPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
+            ]);
+            clearTimeout(timeoutId);
+            
+            if (!arrayBuffer) throw new Error('Empty buffer');
+            
+            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
+            fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
+            const filePath = path.join(saveDir, fileName);
+            
+            await fs.writeFile(filePath, Buffer.from(arrayBuffer));
+            downloadedCount++;
+            success = true;
+          } catch (err) {
+            if (controller) controller.abort();
+            console.error(`Failed to download image ${imgUrl}:`, err.message);
+            if (retries > 0 && !taskState.isCancelled) {
+              console.log(`Retrying download for ${imgUrl} (${retries} retries left)...`);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+            }
+          } finally {
+            if (controller) {
+              const idx = taskState.controllers.indexOf(controller);
+              if (idx > -1) taskState.controllers.splice(idx, 1);
+            }
+          }
+          retries--;
+        }
+        
+        // After all retries or success, increment processedCount
+        processedCount++;
+        
+        const now = Date.now();
+        if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
+        
+        if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
+          taskState.lastProgressTime = now;
           win.webContents.send('download-progress', { 
             id, 
             status: 'downloading_images',
@@ -939,76 +1013,6 @@ export async function startDownload(task, win, settings) {
             downloadedCount,
             currentFile: fileName
           });
-
-          controller = new AbortController();
-          taskState.controllers.push(controller);
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
-          
-          const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-            headers: { 
-              'Referer': url,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            signal: controller.signal
-          }).catch(() => {});
-          
-          const imgRes = await Promise.race([
-            fetchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
-          ]);
-          
-          if (!imgRes || !imgRes.ok) {
-            clearTimeout(timeoutId);
-            throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
-          }
-          
-          const bufferPromise = imgRes.arrayBuffer().catch(() => {});
-          const arrayBuffer = await Promise.race([
-            bufferPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
-          ]);
-          clearTimeout(timeoutId);
-          
-          if (!arrayBuffer) throw new Error('Empty buffer');
-          
-          const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-          fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
-          const filePath = path.join(saveDir, fileName);
-          
-          await fs.writeFile(filePath, Buffer.from(arrayBuffer));
-          downloadedCount++;
-          success = true;
-        } catch (err) {
-          if (controller) controller.abort();
-          console.error(`Failed to download image ${imgUrl}:`, err.message);
-          if (retries > 0 && !taskState.isCancelled) {
-            console.log(`Retrying download for ${imgUrl} (${retries} retries left)...`);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
-            const idx = taskState.controllers.indexOf(controller);
-            if (idx > -1) taskState.controllers.splice(idx, 1);
-            return downloadImage(imgUrl, i, retries - 1);
-          }
-        } finally {
-          const idx = taskState.controllers.indexOf(controller);
-          if (idx > -1) taskState.controllers.splice(idx, 1);
-          
-          if (success || retries === 0 || taskState.isCancelled) {
-            processedCount++;
-            
-            const now = Date.now();
-            if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
-            
-            if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
-              taskState.lastProgressTime = now;
-              win.webContents.send('download-progress', { 
-                id, 
-                status: 'downloading_images',
-                progress: (processedCount / totalImages) * 100, 
-                downloadedCount,
-                currentFile: fileName
-              });
-            }
-          }
         }
       };
 
@@ -1094,16 +1098,89 @@ export async function startDownload(task, win, settings) {
       let downloadedCount = 0;
       let processedCount = 0;
       
-      const downloadImage = async (imgUrl, i, retries = 3) => {
+      const downloadImage = async (imgUrl, i) => {
         checkCancelled();
-        let controller;
-        let fileName = `page_${String(i + 1).padStart(3, '0')}.jpg`;
-        if (retries < 3) {
-          fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
-        }
         let success = false;
-        try {
-          // Send progress update to show which file is currently being downloaded/retried
+        let retries = 3;
+        let fileName = `page_${String(i + 1).padStart(3, '0')}.jpg`;
+        
+        while (retries >= 0 && !success && !taskState.isCancelled) {
+          let controller;
+          try {
+            if (retries < 3) {
+              fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+            }
+            
+            // Send progress update to show which file is currently being downloaded/retried
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'downloading_images',
+              downloadedCount,
+              totalImages,
+              progress: 10 + ((processedCount / totalImages) * 70),
+              currentFile: fileName
+            });
+
+            controller = new AbortController();
+            taskState.controllers.push(controller);
+            const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
+            
+            const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
+              headers: { 
+                'Referer': url,
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+              },
+              signal: controller.signal
+            }).catch(() => {});
+            
+            const imgRes = await Promise.race([
+              fetchPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
+            ]);
+            
+            if (!imgRes || !imgRes.ok) {
+              clearTimeout(timeoutId);
+              throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
+            }
+            
+            const bufferPromise = imgRes.arrayBuffer().catch(() => {});
+            const arrayBuffer = await Promise.race([
+              bufferPromise,
+              new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
+            ]);
+            clearTimeout(timeoutId);
+            
+            if (!arrayBuffer) throw new Error('Empty buffer');
+            
+            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
+            fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
+            await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
+            downloadedCount++;
+            success = true;
+          } catch (err) {
+            if (controller) controller.abort();
+            console.error(`Failed to download image ${imgUrl}:`, err.message);
+            if (retries > 0 && !taskState.isCancelled) {
+              console.log(`Retrying download for ${imgUrl} (${retries} retries left)...`);
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+            }
+          } finally {
+            if (controller) {
+              const idx = taskState.controllers.indexOf(controller);
+              if (idx > -1) taskState.controllers.splice(idx, 1);
+            }
+          }
+          retries--;
+        }
+        
+        // Only increment processedCount after all retries or success
+        processedCount++;
+        
+        const now = Date.now();
+        if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
+        
+        if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
+          taskState.lastProgressTime = now;
           win.webContents.send('download-progress', { 
             id, 
             status: 'downloading_images',
@@ -1112,76 +1189,6 @@ export async function startDownload(task, win, settings) {
             progress: 10 + ((processedCount / totalImages) * 70),
             currentFile: fileName
           });
-
-          controller = new AbortController();
-          taskState.controllers.push(controller);
-          const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
-          
-          const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-            headers: { 
-              'Referer': url,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            signal: controller.signal
-          }).catch(() => {});
-          
-          const imgRes = await Promise.race([
-            fetchPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 10000))
-          ]);
-          
-          if (!imgRes || !imgRes.ok) {
-            clearTimeout(timeoutId);
-            throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
-          }
-          
-          const bufferPromise = imgRes.arrayBuffer().catch(() => {});
-          const arrayBuffer = await Promise.race([
-            bufferPromise,
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Body download timeout')), 10000))
-          ]);
-          clearTimeout(timeoutId);
-          
-          if (!arrayBuffer) throw new Error('Empty buffer');
-          
-          const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-          fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
-          await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
-          downloadedCount++;
-          success = true;
-        } catch (err) {
-          if (controller) controller.abort();
-          console.error(`Failed to download image ${imgUrl}:`, err.message);
-          if (retries > 0 && !taskState.isCancelled) {
-            console.log(`Retrying download for ${imgUrl} (${retries} retries left)...`);
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
-            const idx = taskState.controllers.indexOf(controller);
-            if (idx > -1) taskState.controllers.splice(idx, 1);
-            return downloadImage(imgUrl, i, retries - 1);
-          }
-        } finally {
-          const idx = taskState.controllers.indexOf(controller);
-          if (idx > -1) taskState.controllers.splice(idx, 1);
-          
-          // Only increment processedCount if this is the final attempt (success or no more retries)
-          if (success || retries === 0 || taskState.isCancelled) {
-            processedCount++;
-            
-            const now = Date.now();
-            if (!taskState.lastProgressTime) taskState.lastProgressTime = 0;
-            
-            if (now - taskState.lastProgressTime > 100 || processedCount === totalImages) {
-              taskState.lastProgressTime = now;
-              win.webContents.send('download-progress', { 
-                id, 
-                status: 'downloading_images',
-                downloadedCount,
-                totalImages,
-                progress: 10 + ((processedCount / totalImages) * 70),
-                currentFile: fileName
-              });
-            }
-          }
         }
       };
 
