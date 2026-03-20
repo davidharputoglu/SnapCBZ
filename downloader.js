@@ -50,7 +50,11 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
     // Try to fetch using the existing window's context to bypass Cloudflare TLS fingerprinting
     if (existingWin) {
       try {
-        const currentUrl = await existingWin.webContents.executeJavaScript('window.location.href');
+        const currentUrlPromise = existingWin.webContents.executeJavaScript('window.location.href');
+        const currentUrl = await Promise.race([
+          currentUrlPromise,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('executeJavaScript timeout')), 5000))
+        ]);
         if (currentUrl && currentUrl !== 'about:blank' && new URL(currentUrl).origin === new URL(url).origin) {
           const htmlPromise = existingWin.webContents.executeJavaScript(`
             new Promise((resolve, reject) => {
@@ -438,7 +442,8 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
                            $('a[rel="next"]').attr('href') || 
                            $('.pagination .active').next().find('a').attr('href') || 
                            $('.pagination .page-item.active').next().find('a').attr('href') ||
-                           $('a.page-link:contains("»")').attr('href');
+                           $('a.page-link:contains("»")').attr('href') ||
+                           $('a.page-link:contains("Next")').attr('href');
                            
           if (found > 0 && nextHref && !nextHref.includes('javascript:') && nextHref !== '#') {
             const nextUrl = new URL(nextHref, currentUrl).href;
@@ -797,9 +802,9 @@ export async function startDownload(task, win, settings) {
         const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
         let baseUrl = '';
         if (firstThumb) {
-          const baseUrlMatch = firstThumb.match(/(https:\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t\.[a-z]+$/i);
+          const baseUrlMatch = firstThumb.match(/(https?:)?(\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t\.[a-z]+$/i);
           if (baseUrlMatch) {
-            baseUrl = baseUrlMatch[1];
+            baseUrl = (baseUrlMatch[1] || 'https:') + baseUrlMatch[2];
           }
         }
 
@@ -808,19 +813,37 @@ export async function startDownload(task, win, settings) {
         // w = .webp, j = .jpg, p = .png, g = .gif
         let gTh = {};
         const htmlContent = $.html();
-        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\('([^']+)'\)/);
+        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"](.*?)['"]\)/);
         if (gThMatch) {
           try {
             gTh = JSON.parse(gThMatch[1]);
           } catch (e) {
             console.error("Failed to parse g_th JSON", e);
           }
+        } else {
+          // Try alternative format if they stopped using $.parseJSON
+          const gThDirectMatch = htmlContent.match(/var\s+g_th\s*=\s*(\{.*?\});/);
+          if (gThDirectMatch) {
+            try {
+              gTh = JSON.parse(gThDirectMatch[1]);
+            } catch (e) {
+              console.error("Failed to parse direct g_th JSON", e);
+            }
+          }
         }
 
         const totalPages = Object.keys(gTh).length;
         if (totalPages > 0 && baseUrl) {
           for (let i = 1; i <= totalPages; i++) {
-            const extCode = gTh[i] ? gTh[i].split(',')[0] : 'j';
+            let extCode = 'j';
+            if (gTh[i]) {
+              if (Array.isArray(gTh[i])) {
+                extCode = gTh[i][0];
+              } else if (typeof gTh[i] === 'string') {
+                extCode = gTh[i].split(',')[0];
+              }
+            }
+            
             let imageExt = '.jpg';
             if (extCode === 'w') imageExt = '.webp';
             else if (extCode === 'p') imageExt = '.png';
