@@ -806,6 +806,8 @@ export async function startDownload(task, win, settings) {
           const baseUrlMatch = firstThumb.match(/(https?:)?(\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t\.[a-z]+$/i);
           if (baseUrlMatch) {
             baseUrl = (baseUrlMatch[1] || 'https:') + baseUrlMatch[2];
+            // IMHentai uses t1, t2 for thumbnails and m1, m2 for images
+            baseUrl = baseUrl.replace(/\/\/t([0-9]*)\.imhentai\.xxx/, '//m$1.imhentai.xxx');
           }
         }
 
