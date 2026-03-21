@@ -254,17 +254,13 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
 
           if (isCloudflare) {
             cloudflareTime += 1;
-          }
-
-          // Show window if we detect Cloudflare OR if it's taking too long (might be an unknown captcha)
-          if ((cloudflareTime > 2 || timeElapsed > 5) && !win.isVisible()) {
-            win.show();
-            win.setTitle("Please wait or solve the captcha if necessary...");
-          }
-
-          if (isCloudflare) {
             lastState = `Cloudflare detected: title="${title}", bodyText.length=${bodyText.length}`;
             console.log(lastState);
+            if (!win.isVisible()) {
+              win.show();
+              win.focus();
+              win.setTitle("Please wait or solve the captcha if necessary...");
+            }
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             return; // Wait for next interval
           }
@@ -276,6 +272,11 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
           if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
             lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
             console.log(lastState);
+            if (timeElapsed > 5 && !win.isVisible()) {
+              win.show();
+              win.focus();
+              win.setTitle("Loading page, please wait...");
+            }
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             return; // Wait for next interval
           }
@@ -816,7 +817,9 @@ export async function startDownload(task, win, settings) {
         const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"](.*?)['"]\)/);
         if (gThMatch) {
           try {
-            gTh = JSON.parse(gThMatch[1]);
+            // IMHentai escapes quotes in the JSON string: '{\"1\":[\"j\",1074,1516]}'
+            const unescapedJson = gThMatch[1].replace(/\\"/g, '"');
+            gTh = JSON.parse(unescapedJson);
           } catch (e) {
             console.error("Failed to parse g_th JSON", e);
           }
