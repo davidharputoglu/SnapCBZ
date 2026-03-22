@@ -11,6 +11,7 @@ import {
   Palette,
   MoonStar,
   Image as ImageIcon,
+  BookOpen,
 } from "lucide-react";
 import { useAppStore, ThemeColor } from "../store";
 import { useTranslation, AppLanguage } from "../translations";
@@ -20,6 +21,7 @@ export const SettingsView: React.FC = () => {
   const { t } = useTranslation();
   const [newLangName, setNewLangName] = useState("");
   const [newColorHex, setNewColorHex] = useState("#14b8a6");
+  const [customSiteUrl, setCustomSiteUrl] = useState("");
 
   // Ensure languages exists (fallback for older local storage data)
   const languages = settings.languages || [
@@ -209,6 +211,234 @@ export const SettingsView: React.FC = () => {
                 onChange={(v) => updateSettings({ imageBoardDirectory: v })}
                 icon={<Folder className="w-5 h-5 text-muted-foreground" />}
               />
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-card border border-border rounded-3xl p-8 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-primary/10 text-primary rounded-xl">
+              <Globe2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">
+                {t("set_accounts")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("set_accounts_desc")}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                  IM
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">IMHentai</h3>
+                  <p className="text-xs text-muted-foreground">imhentai.xxx</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  try {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.invoke('open-login-window', 'https://imhentai.xxx/login/');
+                  } catch (e) {
+                    console.error("Electron not available");
+                  }
+                }}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
+              >
+                {t("set_login") as string}
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                  NH
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">nHentai</h3>
+                  <p className="text-xs text-muted-foreground">nhentai.net</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  try {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.invoke('open-login-window', 'https://nhentai.net/login/');
+                  } catch (e) {
+                    console.error("Electron not available");
+                  }
+                }}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
+              >
+                {t("set_login") as string}
+              </button>
+            </div>
+            
+            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                  3H
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">3hentai</h3>
+                  <p className="text-xs text-muted-foreground">3hentai.net</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  try {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.invoke('open-login-window', 'https://3hentai.net/login');
+                  } catch (e) {
+                    console.error("Electron not available");
+                  }
+                }}
+                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
+              >
+                {t("set_login") as string}
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 mt-4">
+              <input
+                type="url"
+                value={customSiteUrl}
+                onChange={(e) => setCustomSiteUrl(e.target.value)}
+                placeholder={(t("set_custom_site_url") as string) || "https://..."}
+                className="flex-1 px-4 py-2 bg-muted/30 border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+              />
+              <button
+                onClick={() => {
+                  if (!customSiteUrl) return;
+                  let url = customSiteUrl;
+                  if (!url.startsWith('http')) url = 'https://' + url;
+                  try {
+                    const { ipcRenderer } = window.require('electron');
+                    ipcRenderer.invoke('open-login-window', url);
+                    setCustomSiteUrl("");
+                  } catch (e) {
+                    console.error("Electron not available");
+                  }
+                }}
+                disabled={!customSiteUrl.trim()}
+                className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+              >
+                {(t("set_open_login") as string) || "Open"}
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-card border border-border rounded-3xl p-8 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-primary/10 text-primary rounded-xl">
+              <BookOpen className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">
+                {t("set_manhwa_title")}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("set_manhwa_desc")}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-6">
+            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-2xl border border-border">
+              <div>
+                <h3 className="font-medium text-foreground">
+                  {t("set_manhwa_enable")}
+                </h3>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={settings.enableManhwa ?? true}
+                  onChange={(e) =>
+                    updateSettings({ enableManhwa: e.target.checked })
+                  }
+                />
+                <div className="w-11 h-6 bg-muted peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+              </label>
+            </div>
+
+            <div className="p-4 bg-muted/50 rounded-2xl border border-border">
+              <h3 className="font-medium text-foreground mb-4">
+                {t("set_manhwa_format")}
+              </h3>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="manhwaFormat"
+                    value="cbz"
+                    checked={(settings.manhwaFormat || "cbz") === "cbz"}
+                    onChange={() => updateSettings({ manhwaFormat: "cbz" })}
+                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary"
+                  />
+                  <span className="text-sm text-foreground">
+                    {t("set_manhwa_format_cbz")}
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="manhwaFormat"
+                    value="images"
+                    checked={settings.manhwaFormat === "images"}
+                    onChange={() => updateSettings({ manhwaFormat: "images" })}
+                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary"
+                  />
+                  <span className="text-sm text-foreground">
+                    {t("set_manhwa_format_images")}
+                  </span>
+                </label>
+              </div>
+            </div>
+
+            <div className="p-4 bg-muted/50 rounded-2xl border border-border">
+              <h3 className="font-medium text-foreground mb-2">
+                {t("set_accounts")}
+              </h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                {t("set_accounts_desc")}
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  type="url"
+                  value={customSiteUrl}
+                  onChange={(e) => setCustomSiteUrl(e.target.value)}
+                  placeholder={(t("set_custom_site_url") as string) || "https://..."}
+                  className="flex-1 px-4 py-2 bg-background border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                />
+                <button
+                  onClick={() => {
+                    if (!customSiteUrl) return;
+                    let url = customSiteUrl;
+                    if (!url.startsWith('http')) url = 'https://' + url;
+                    try {
+                      const { ipcRenderer } = window.require('electron');
+                      ipcRenderer.invoke('open-login-window', url);
+                      setCustomSiteUrl("");
+                    } catch (e) {
+                      console.error("Electron not available");
+                    }
+                  }}
+                  disabled={!customSiteUrl.trim()}
+                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                >
+                  {(t("set_open_login") as string) || "Open"}
+                </button>
+              </div>
             </div>
           </div>
         </section>

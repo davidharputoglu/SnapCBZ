@@ -130,6 +130,31 @@ ipcMain.handle('fetch-gallery-links', async (event, url, taskId) => {
   }
 });
 
+ipcMain.handle('open-login-window', async (event, url) => {
+  return new Promise((resolve) => {
+    const loginWin = new BrowserWindow({
+      width: 1000,
+      height: 800,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:scraper'
+      }
+    });
+    
+    // Set a clean user agent
+    const defaultUserAgent = loginWin.webContents.session.getUserAgent();
+    const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+    loginWin.webContents.userAgent = cleanUserAgent;
+    
+    loginWin.loadURL(url);
+    
+    loginWin.on('closed', () => {
+      resolve(true);
+    });
+  });
+});
+
 app.whenReady().then(() => {
   createWindow();
 

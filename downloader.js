@@ -613,6 +613,7 @@ export async function startDownload(task, win, settings) {
     let title = 'Gallery';
     let extractedArtist = category; // Start with what we got from the URL
     let extractedLanguage = language; // Start with what we got from the URL
+    let isManhwa = false;
     
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
@@ -820,6 +821,8 @@ export async function startDownload(task, win, settings) {
         const loadServer = $('#load_server').val() || $('#server').val() || $('#image_server').val();
         const loadDir = $('#load_dir').val() || $('#dir').val() || $('#image_dir').val();
         
+        const loadPages = parseInt($('#load_pages').val() || $('#pages').val() || '0', 10);
+        
         let baseUrl = '';
         if (loadServer && loadDir) {
           // e.g. server="m3", dir="123456" -> https://m3.imhentai.xxx/123456
@@ -859,7 +862,7 @@ export async function startDownload(task, win, settings) {
           }
         } else {
           // Try alternative format if they stopped using $.parseJSON
-          const gThDirectMatch = htmlContent.match(/var\s+g_th\s*=\s*(\{.*?\});/);
+          const gThDirectMatch = htmlContent.match(/var\s+g_th\s*=\s*(\{[\s\S]*?\});/);
           if (gThDirectMatch) {
             try {
               gTh = JSON.parse(gThDirectMatch[1]);
@@ -869,7 +872,7 @@ export async function startDownload(task, win, settings) {
           }
         }
 
-        const totalPages = Object.keys(gTh).length;
+        const totalPages = Object.keys(gTh).length || loadPages;
         if (totalPages > 0 && baseUrl) {
           for (let i = 1; i <= totalPages; i++) {
             let extCode = 'j';
@@ -895,8 +898,9 @@ export async function startDownload(task, win, settings) {
             let src = $(el).attr('data-src') || $(el).attr('src');
             if (src) {
               // Convert thumbnail URL to full image URL
-              // Example: https://m10.imhentai.xxx/029/85nl14c70e/1t.jpg -> https://m10.imhentai.xxx/029/85nl14c70e/1.jpg
-              const realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+              // Example: https://t10.imhentai.xxx/029/85nl14c70e/1t.jpg -> https://m10.imhentai.xxx/029/85nl14c70e/1.jpg
+              let realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
+              realSrc = realSrc.replace(/\/\/t([0-9]*)\.imhentai\.xxx/, '//m$1.imhentai.xxx');
               imageUrls.push(realSrc);
             }
           });
@@ -911,6 +915,67 @@ export async function startDownload(task, win, settings) {
               }
             });
           }
+        }
+      } else {
+        // Generic Fallback for Manhwa / Manga / Webtoon sites
+        if (settings.enableManhwa === false) {
+          throw new Error("Manhwa/Webtoon support is disabled in settings.");
+        }
+        
+        isManhwa = true;
+        
+        try {
+          const res = await safeGet(url, {}, taskState);
+          const $ = cheerio.load(res.data);
+          
+          title = $('title').text().trim() || 'Chapter';
+          
+          // Try to extract manga name from title (usually "Manga Name - Chapter X")
+          let titleParts = title.split('-');
+          let separator = '-';
+          if (titleParts.length === 1) {
+            titleParts = title.split('|');
+            separator = '|';
+          }
+          
+          if (titleParts.length > 1) {
+            extractedArtist = titleParts[0].trim();
+            // Try to find the part containing "Chapter" or "Chapitre"
+            const chapterPart = titleParts.slice(1).find(part => part.toLowerCase().includes('chapter') || part.toLowerCase().includes('chapitre') || part.toLowerCase().includes('chap'));
+            if (chapterPart) {
+              title = chapterPart.trim();
+            } else {
+              title = titleParts.slice(1).join(separator).trim();
+            }
+          }
+          
+          // Common manhwa/manga reader image selectors (Madara theme, etc.)
+          const selectors = [
+            '.reading-content img',
+            '.page-break img',
+            '#vungdoc img',
+            '.vung_doc img',
+            '.container-chapter img',
+            '#readerarea img',
+            '.chapter-video-frame img',
+            '.chapter-content img',
+            '.entry-content img'
+          ];
+          
+          for (const selector of selectors) {
+            $(selector).each((i, el) => {
+              let src = $(el).attr('data-src') || $(el).attr('data-lazy-src') || $(el).attr('src') || $(el).attr('data-original');
+              if (src && !src.includes('data:image/gif') && !src.includes('blank.gif') && !src.includes('logo')) {
+                // Handle relative URLs
+                if (src.startsWith('//')) src = 'https:' + src;
+                else if (src.startsWith('/')) src = urlObj.origin + src;
+                imageUrls.push(src.trim());
+              }
+            });
+            if (imageUrls.length > 0) break;
+          }
+        } catch (e) {
+          console.error("Generic scraper failed, might need Cloudflare bypass", e);
         }
       }
     } catch (scrapeError) {
@@ -1105,8 +1170,8 @@ export async function startDownload(task, win, settings) {
     } else {
       // CBZ Mode
       
-      // Clean up the category/artist name for the folder (replace spaces with hyphens)
-      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim().replace(/\s+/g, '-');
+      // Clean up the category/artist name for the folder
+      const cleanCategory = (extractedArtist || 'Misc').replace(/[<>:"/\\|?*]+/g, '').trim();
       title = title.replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
 
       // Ensure the language matches one of the user's configured languages
@@ -1273,132 +1338,149 @@ export async function startDownload(task, win, settings) {
         throw new Error("Cannot download images. The site blocks access or requires a Referer.");
       }
       
-      win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
-      
-      const output = fs.createWriteStream(finalPath);
-      const archive = archiver('zip', { zlib: { level: 0 } });
-      
-      await new Promise((resolve, reject) => {
-        let isDone = false;
+      if (isManhwa && settings.manhwaFormat === 'images') {
+        win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
         
-        const archiveTimeout = setTimeout(() => {
-          if (!isDone) {
-            isDone = true;
-            reject(new Error("La création de l'archive a pris trop de temps (timeout)."));
-          }
-        }, 10 * 60 * 1000); // 10 minutes timeout
-
-        // Add cancellation handler for archiving phase
-        const cancelInterval = setInterval(() => {
-          if (taskState.isCancelled && !isDone) {
-            isDone = true;
-            clearTimeout(archiveTimeout);
-            clearInterval(cancelInterval);
-            archive.abort();
-            output.destroy();
-            fs.remove(tempDir).catch(() => {});
-            fs.remove(finalPath).catch(() => {});
-            reject(new Error("Download cancelled by user"));
-          }
-        }, 1000);
-
-        const onComplete = () => {
-          if (isDone) return;
-          isDone = true;
-          clearTimeout(archiveTimeout);
-          clearInterval(cancelInterval);
-          
-          // Fire and forget the cleanup to prevent hanging the download process
-          // if files are still locked by the OS or antivirus
-          fs.remove(tempDir).catch(e => console.warn('Failed to remove temp dir (non-critical):', e.message));
-          
-          win.webContents.send('download-progress', { 
-            id, 
-            status: 'completed', 
-            progress: 100, 
-            filename: finalFilename,
-            finalPath: finalPath 
-          });
-          resolve();
-        };
+        const finalImageDir = path.join(saveDir, title);
+        await fs.ensureDir(finalImageDir);
+        await fs.copy(tempDir, finalImageDir);
+        fs.remove(tempDir).catch(() => {});
         
-        output.on('close', onComplete);
-        output.on('finish', onComplete);
-        
-        output.on('error', (err) => {
-          if (!isDone) {
-            isDone = true;
-            clearTimeout(archiveTimeout);
-            clearInterval(cancelInterval);
-            reject(err);
-          }
+        win.webContents.send('download-progress', { 
+          id, 
+          status: 'completed', 
+          progress: 100, 
+          filename: title,
+          finalPath: finalImageDir 
         });
+      } else {
+        win.webContents.send('download-progress', { id, status: 'converting', progress: 80, filename: title });
         
-        archive.on('error', (err) => {
-          if (!isDone) {
+        const output = fs.createWriteStream(finalPath);
+        const archive = archiver('zip', { zlib: { level: 0 } });
+        
+        await new Promise((resolve, reject) => {
+          let isDone = false;
+          
+          const archiveTimeout = setTimeout(() => {
+            if (!isDone) {
+              isDone = true;
+              reject(new Error("La création de l'archive a pris trop de temps (timeout)."));
+            }
+          }, 10 * 60 * 1000); // 10 minutes timeout
+
+          // Add cancellation handler for archiving phase
+          const cancelInterval = setInterval(() => {
+            if (taskState.isCancelled && !isDone) {
+              isDone = true;
+              clearTimeout(archiveTimeout);
+              clearInterval(cancelInterval);
+              archive.abort();
+              output.destroy();
+              fs.remove(tempDir).catch(() => {});
+              fs.remove(finalPath).catch(() => {});
+              reject(new Error("Download cancelled by user"));
+            }
+          }, 1000);
+
+          const onComplete = () => {
+            if (isDone) return;
             isDone = true;
             clearTimeout(archiveTimeout);
             clearInterval(cancelInterval);
-            reject(err);
-          }
-        });
-
-        archive.on('warning', (err) => {
-          if (err.code === 'ENOENT') {
-            console.warn('Archiver warning:', err);
-          } else {
+            
+            // Fire and forget the cleanup to prevent hanging the download process
+            // if files are still locked by the OS or antivirus
+            fs.remove(tempDir).catch(e => console.warn('Failed to remove temp dir (non-critical):', e.message));
+            
+            win.webContents.send('download-progress', { 
+              id, 
+              status: 'completed', 
+              progress: 100, 
+              filename: finalFilename,
+              finalPath: finalPath 
+            });
+            resolve();
+          };
+          
+          output.on('close', onComplete);
+          output.on('finish', onComplete);
+          
+          output.on('error', (err) => {
             if (!isDone) {
               isDone = true;
               clearTimeout(archiveTimeout);
               clearInterval(cancelInterval);
               reject(err);
             }
-          }
-        });
+          });
+          
+          archive.on('error', (err) => {
+            if (!isDone) {
+              isDone = true;
+              clearTimeout(archiveTimeout);
+              clearInterval(cancelInterval);
+              reject(err);
+            }
+          });
 
-        let lastArchiveProgressTime = 0;
-        archive.on('progress', (progressData) => {
-          try {
-            const now = Date.now();
-            if (now - lastArchiveProgressTime > 100 || (progressData.entries && progressData.entries.processed === downloadedCount)) {
-              lastArchiveProgressTime = now;
-              // Use downloadedCount as the absolute total since entries.total grows dynamically
-              let processed = 0;
-              if (progressData && progressData.entries && typeof progressData.entries.processed === 'number') {
-                processed = progressData.entries.processed;
+          archive.on('warning', (err) => {
+            if (err.code === 'ENOENT') {
+              console.warn('Archiver warning:', err);
+            } else {
+              if (!isDone) {
+                isDone = true;
+                clearTimeout(archiveTimeout);
+                clearInterval(cancelInterval);
+                reject(err);
               }
-              const percent = 80 + ((processed / downloadedCount) * 20);
-              win.webContents.send('download-progress', { 
-                id, 
-                status: 'converting', 
-                progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
-              });
             }
-          } catch (e) {
-            console.error('Error in archive progress:', e);
-          }
-        });
-        
-        try {
-          archive.pipe(output);
-          archive.directory(tempDir, false);
-          archive.finalize().catch(err => {
+          });
+
+          let lastArchiveProgressTime = 0;
+          archive.on('progress', (progressData) => {
+            try {
+              const now = Date.now();
+              if (now - lastArchiveProgressTime > 100 || (progressData.entries && progressData.entries.processed === downloadedCount)) {
+                lastArchiveProgressTime = now;
+                // Use downloadedCount as the absolute total since entries.total grows dynamically
+                let processed = 0;
+                if (progressData && progressData.entries && typeof progressData.entries.processed === 'number') {
+                  processed = progressData.entries.processed;
+                }
+                const percent = 80 + ((processed / downloadedCount) * 20);
+                win.webContents.send('download-progress', { 
+                  id, 
+                  status: 'converting', 
+                  progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
+                });
+              }
+            } catch (e) {
+              console.error('Error in archive progress:', e);
+            }
+          });
+          
+          try {
+            archive.pipe(output);
+            archive.directory(tempDir, false);
+            archive.finalize().catch(err => {
+              if (!isDone) {
+                isDone = true;
+                clearTimeout(archiveTimeout);
+                clearInterval(cancelInterval);
+                reject(err);
+              }
+            });
+          } catch (err) {
             if (!isDone) {
               isDone = true;
               clearTimeout(archiveTimeout);
               clearInterval(cancelInterval);
               reject(err);
             }
-          });
-        } catch (err) {
-          if (!isDone) {
-            isDone = true;
-            clearTimeout(archiveTimeout);
-            clearInterval(cancelInterval);
-            reject(err);
           }
-        }
-      });
+        });
+      }
     }
     
   } catch (error) {

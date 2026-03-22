@@ -23,6 +23,8 @@ export interface Settings {
   themeColor: string;
   customColors?: CustomColor[];
   lightWallpaper?: string | null;
+  enableManhwa?: boolean;
+  manhwaFormat?: "cbz" | "images";
 }
 
 export interface DownloadTask {
@@ -82,6 +84,8 @@ const defaultSettings: Settings = {
   themeColor: "turquoise",
   customColors: [],
   lightWallpaper: null,
+  enableManhwa: true,
+  manhwaFormat: "cbz",
 };
 
 const AppContext = createContext<AppState | undefined>(undefined);
