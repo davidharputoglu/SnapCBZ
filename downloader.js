@@ -94,8 +94,11 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
       }
     }
 
+    const defaultUserAgent = session.defaultSession.getUserAgent();
+    const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+    
     const scraperSession = session.fromPartition('persist:scraper');
-    scraperSession.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    scraperSession.setUserAgent(cleanUserAgent);
     
     const controller = new AbortController();
     if (taskState && taskState.controllers) taskState.controllers.push(controller);
@@ -189,8 +192,11 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
           partition: 'persist:scraper'
         }
       });
+      const defaultUserAgent = session.defaultSession.getUserAgent();
+      const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+      
       if (!existingWin) {
-        win.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        win.webContents.userAgent = cleanUserAgent;
       }
 
       let resolved = false;
@@ -232,8 +238,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
         if (resolved) return;
         timeElapsed += 1;
         try {
-          const title = await executeWithTimeout('document.title');
-          const bodyText = await executeWithTimeout('document.body.innerText || ""');
+          const title = await executeWithTimeout('document.title || ""');
+          const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
           
           if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
             if (!resolved) {
@@ -309,11 +315,13 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
       }
 
       const startLoad = async () => {
-        checkTimeout = setTimeout(checkPage, 1000);
-        
-        win.loadURL(url, {
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }).catch(e => {
+        try {
+          checkTimeout = setTimeout(checkPage, 1000);
+          
+          await win.loadURL(url, {
+            userAgent: cleanUserAgent
+          });
+        } catch (e) {
           if (!resolved) {
             resolved = true;
             if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
@@ -321,7 +329,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
             if (!existingWin) { try { win.destroy(); } catch (err) {} }
             reject(e);
           }
-        });
+        }
       };
       
       startLoad();
@@ -409,6 +417,9 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
         let pagesFetched = 0;
         const visitedUrls = new Set();
         
+        const defaultUserAgent = session.defaultSession.getUserAgent();
+        const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+        
         scraperWin = new BrowserWindow({
           show: false,
           width: 800,
@@ -420,7 +431,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
           }
         });
         taskState.scraperWin = scraperWin;
-        scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        scraperWin.webContents.userAgent = cleanUserAgent;
 
         while (currentUrl && pagesFetched < 50) {
           checkCancelled();
@@ -509,6 +520,9 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
         let pagesFetched = 0;
         const visitedUrls = new Set();
         
+        const defaultUserAgent = session.defaultSession.getUserAgent();
+        const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+        
         scraperWin = new BrowserWindow({
           show: false,
           width: 800,
@@ -520,7 +534,7 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
           }
         });
         taskState.scraperWin = scraperWin;
-        scraperWin.webContents.userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+        scraperWin.webContents.userAgent = cleanUserAgent;
 
         while (currentUrl && pagesFetched < 50) {
           checkCancelled();
@@ -580,6 +594,9 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
 }
 
 export async function startDownload(task, win, settings) {
+  const defaultUserAgent = session.defaultSession.getUserAgent();
+  const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+  
   const taskState = { isCancelled: false, controllers: [] };
   activeTasks.set(task.id, taskState);
 
@@ -799,16 +816,31 @@ export async function startDownload(task, win, settings) {
         else if (langText.includes('italian') || langText.includes('italiano')) extractedLanguage = 'it';
         else extractedLanguage = 'other';
 
+        // Extract base URL from hidden inputs first (most reliable)
+        const loadServer = $('#load_server').val() || $('#server').val() || $('#image_server').val();
+        const loadDir = $('#load_dir').val() || $('#dir').val() || $('#image_dir').val();
+        
+        let baseUrl = '';
+        if (loadServer && loadDir) {
+          // e.g. server="m3", dir="123456" -> https://m3.imhentai.xxx/123456
+          // Wait, sometimes dir includes the subfolder, sometimes it's just the ID.
+          // Let's check the thumbnail to be sure about the path structure.
+        }
+
         // Extract base URL from the first thumbnail
         const firstThumb = $('.gthumb img').first().attr('data-src') || $('.gthumb img').first().attr('src');
-        let baseUrl = '';
         if (firstThumb) {
-          const baseUrlMatch = firstThumb.match(/(https?:)?(\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t\.[a-z]+$/i);
+          const baseUrlMatch = firstThumb.match(/(https?:)?(\/\/[a-z0-9]+\.imhentai\.xxx\/.*)\/[0-9]+t?\.[a-z]+$/i);
           if (baseUrlMatch) {
             baseUrl = (baseUrlMatch[1] || 'https:') + baseUrlMatch[2];
             // IMHentai uses t1, t2 for thumbnails and m1, m2 for images
             baseUrl = baseUrl.replace(/\/\/t([0-9]*)\.imhentai\.xxx/, '//m$1.imhentai.xxx');
           }
+        }
+        
+        // If we still don't have a baseUrl but we have loadServer and loadDir
+        if (!baseUrl && loadServer && loadDir) {
+           baseUrl = `https://${loadServer}.imhentai.xxx/${loadDir}`;
         }
 
         // Extract the g_th JSON which contains the extensions for each page
@@ -979,7 +1011,7 @@ export async function startDownload(task, win, settings) {
             const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
               headers: { 
                 'Referer': url,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'User-Agent': cleanUserAgent
               },
               signal: controller.signal
             }).catch(() => {});
@@ -1155,8 +1187,10 @@ export async function startDownload(task, win, settings) {
             
             const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
               headers: { 
-                'Referer': url,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                'Referer': new URL(url).origin + '/',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'User-Agent': cleanUserAgent
               },
               signal: controller.signal
             }).catch(() => {});
@@ -1324,16 +1358,24 @@ export async function startDownload(task, win, settings) {
 
         let lastArchiveProgressTime = 0;
         archive.on('progress', (progressData) => {
-          const now = Date.now();
-          if (now - lastArchiveProgressTime > 100 || progressData.entries.processed === downloadedCount) {
-            lastArchiveProgressTime = now;
-            // Use downloadedCount as the absolute total since entries.total grows dynamically
-            const percent = 80 + ((progressData.entries.processed / downloadedCount) * 20);
-            win.webContents.send('download-progress', { 
-              id, 
-              status: 'converting', 
-              progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
-            });
+          try {
+            const now = Date.now();
+            if (now - lastArchiveProgressTime > 100 || (progressData.entries && progressData.entries.processed === downloadedCount)) {
+              lastArchiveProgressTime = now;
+              // Use downloadedCount as the absolute total since entries.total grows dynamically
+              let processed = 0;
+              if (progressData && progressData.entries && typeof progressData.entries.processed === 'number') {
+                processed = progressData.entries.processed;
+              }
+              const percent = 80 + ((processed / downloadedCount) * 20);
+              win.webContents.send('download-progress', { 
+                id, 
+                status: 'converting', 
+                progress: isNaN(percent) ? 80 : Math.min(percent, 99) // Cap at 99 until finished
+              });
+            }
+          } catch (e) {
+            console.error('Error in archive progress:', e);
           }
         });
         
