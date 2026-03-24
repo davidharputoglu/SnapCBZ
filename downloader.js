@@ -32,8 +32,22 @@ export function cancelTask(taskId) {
   }
 }
 
+const loggedInSites = new Set();
+let loginPromiseMap = new Map();
+
 async function autoLogin(siteUrl, username, password) {
-  return new Promise((resolve, reject) => {
+  const urlObj = new URL(siteUrl);
+  const siteKey = urlObj.hostname;
+  
+  if (loggedInSites.has(siteKey)) {
+    return true;
+  }
+  
+  if (loginPromiseMap.has(siteKey)) {
+    return loginPromiseMap.get(siteKey);
+  }
+
+  const loginPromise = new Promise((resolve, reject) => {
     const win = new BrowserWindow({
       show: false,
       width: 800,
@@ -50,7 +64,8 @@ async function autoLogin(siteUrl, username, password) {
     win.webContents.userAgent = cleanUserAgent;
 
     let loginTimeout = setTimeout(() => {
-      if (!win.isDestroyed()) win.destroy();
+      try { if (!win.isDestroyed()) win.destroy(); } catch(e) {}
+      loginPromiseMap.delete(siteKey);
       reject(new Error("Auto-login timeout"));
     }, 30000);
 
@@ -59,20 +74,29 @@ async function autoLogin(siteUrl, username, password) {
     win.webContents.on('did-finish-load', async () => {
       if (hasSubmitted) return; // Don't try to login again after submitting
       try {
-        const hasLoginForm = await win.webContents.executeJavaScript(`
+        const executeWithTimeout = (script, ms = 5000) => {
+          return Promise.race([
+            win.webContents.executeJavaScript(script),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Script timeout')), ms))
+          ]);
+        };
+
+        const hasLoginForm = await executeWithTimeout(`
           document.querySelector('input[type="password"]') !== null
         `);
 
         if (!hasLoginForm) {
           // Maybe already logged in, or not a login page
           clearTimeout(loginTimeout);
-          if (!win.isDestroyed()) win.destroy();
+          try { if (!win.isDestroyed()) win.destroy(); } catch(e) {}
+          loggedInSites.add(siteKey);
+          loginPromiseMap.delete(siteKey);
           resolve(true);
           return;
         }
 
         hasSubmitted = true;
-        const submitted = await win.webContents.executeJavaScript(`
+        const submitted = await executeWithTimeout(`
           (function() {
             const userInputs = document.querySelectorAll('input[type="text"], input[type="email"], input[name*="user"], input[name*="log"], input[name*="email"]');
             const passInputs = document.querySelectorAll('input[type="password"]');
@@ -113,33 +137,36 @@ async function autoLogin(siteUrl, username, password) {
         if (submitted) {
           win.webContents.once('did-navigate', () => {
             clearTimeout(loginTimeout);
-            if (!win.isDestroyed()) win.destroy();
+            try { if (!win.isDestroyed()) win.destroy(); } catch(e) {}
+            loggedInSites.add(siteKey);
+            loginPromiseMap.delete(siteKey);
             resolve(true);
           });
           
           setTimeout(() => {
             clearTimeout(loginTimeout);
-            if (!win.isDestroyed()) {
-              win.destroy();
-              resolve(true);
-            }
+            try { if (!win.isDestroyed()) win.destroy(); } catch(e) {}
+            loggedInSites.add(siteKey);
+            loginPromiseMap.delete(siteKey);
+            resolve(true);
           }, 5000);
         } else {
           clearTimeout(loginTimeout);
-          if (!win.isDestroyed()) win.destroy();
+          try { if (!win.isDestroyed()) win.destroy(); } catch(e) {}
+          loginPromiseMap.delete(siteKey);
           resolve(false);
         }
 
       } catch (e) {
         clearTimeout(loginTimeout);
-        if (!win.isDestroyed()) win.destroy();
+        try { if (!win.isDestroyed()) win.destroy(); } catch(err) {}
+        loginPromiseMap.delete(siteKey);
         reject(e);
       }
     });
 
     let loginUrl = siteUrl;
     try {
-      const urlObj = new URL(siteUrl);
       if (siteUrl.includes('imhentai.xxx')) loginUrl = 'https://imhentai.xxx/login/';
       else if (siteUrl.includes('nhentai.net')) loginUrl = 'https://nhentai.net/login/';
       else if (siteUrl.includes('3hentai.net')) loginUrl = 'https://3hentai.net/login';
@@ -148,6 +175,9 @@ async function autoLogin(siteUrl, username, password) {
 
     win.loadURL(loginUrl);
   });
+  
+  loginPromiseMap.set(siteKey, loginPromise);
+  return loginPromise;
 }
 
 async function fastFetchHtml(url, existingWin = null, taskState = null) {
@@ -517,11 +547,12 @@ async function safeGet(url, config = {}, taskState = null) {
     
     const contentType = res.headers.get('content-type') || '';
     let data;
-    if (contentType.includes('application/json')) {
-      data = await res.json();
-    } else {
-      data = await res.text();
-    }
+    
+    const parsePromise = contentType.includes('application/json') ? res.json() : res.text();
+    data = await Promise.race([
+      parsePromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Data parsing timeout')), 20000))
+    ]);
     
     return { data, status: res.status, headers: res.headers };
   } catch (err) {
@@ -631,8 +662,14 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           visitedUrls.add(currentUrl);
           
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
-          const res = await safeGet(currentUrl);
-          const $ = cheerio.load(res.data);
+          let html = '';
+          try {
+            html = await fastFetchHtml(currentUrl, null, taskState);
+          } catch (e) {
+            const res = await safeGet(currentUrl);
+            html = res.data;
+          }
+          const $ = cheerio.load(html);
           let found = 0;
           $('.grid-item a').each((i, el) => {
             const href = $(el).attr('href');
@@ -821,6 +858,7 @@ export async function startDownload(task, win, settings) {
         } catch (e) {
           console.error("Auto-login failed:", e);
         }
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Scraping site..." });
       }
     }
 
@@ -937,8 +975,14 @@ export async function startDownload(task, win, settings) {
           }
         }
       } else if (hostname.includes('3hentai.net')) {
-        const res = await safeGet(url, {}, taskState);
-        const $ = cheerio.load(res.data);
+        let html = '';
+        try {
+          html = await fastFetchHtml(url, null, taskState);
+        } catch (e) {
+          const res = await safeGet(url, {}, taskState);
+          html = res.data;
+        }
+        const $ = cheerio.load(html);
         title = $('title').text().replace(' - 3hentai', '').trim();
         
         // Extract artist
@@ -1131,8 +1175,15 @@ export async function startDownload(task, win, settings) {
         isManhwa = true;
         
         try {
-          const res = await safeGet(url, {}, taskState);
-          const $ = cheerio.load(res.data);
+          let html = '';
+          try {
+            html = await fastFetchHtml(url, null, taskState);
+          } catch (e) {
+            console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+            const res = await safeGet(url, {}, taskState);
+            html = res.data;
+          }
+          const $ = cheerio.load(html);
           
           title = $('title').text().trim() || 'Chapter';
           
@@ -1196,10 +1247,15 @@ export async function startDownload(task, win, settings) {
     if (imageUrls.length === 0) {
       let html = '';
       if (hostname.includes('nhentai.net')) {
-        html = await fastFetchHtml(url);
+        html = await fastFetchHtml(url, null, taskState);
       } else if (!hostname.includes('imhentai.xxx')) {
-        const response = await safeGet(url);
-        html = response.data;
+        try {
+          html = await fastFetchHtml(url, null, taskState);
+        } catch (e) {
+          console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          const response = await safeGet(url, {}, taskState);
+          html = response.data;
+        }
       }
       
       if (html) {
