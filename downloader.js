@@ -1,20 +1,9 @@
 import fs from 'fs-extra';
 import path from 'path';
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import archiver from 'archiver';
 import crypto from 'crypto';
 import { app, BrowserWindow, session } from 'electron';
-
-const axiosInstance = axios.create({
-  timeout: 15000, // 15 seconds timeout to prevent getting stuck
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.5',
-    'Referer': 'https://google.com/'
-  }
-});
 
 const maxConcurrentScrapers = 3;
 let activeScrapers = 0;
@@ -41,6 +30,124 @@ export function cancelTask(taskId) {
       try { taskState.scraperWin.destroy(); } catch (e) {}
     }
   }
+}
+
+async function autoLogin(siteUrl, username, password) {
+  return new Promise((resolve, reject) => {
+    const win = new BrowserWindow({
+      show: false,
+      width: 800,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        partition: 'persist:scraper'
+      }
+    });
+
+    const defaultUserAgent = session.defaultSession.getUserAgent();
+    const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+    win.webContents.userAgent = cleanUserAgent;
+
+    let loginTimeout = setTimeout(() => {
+      if (!win.isDestroyed()) win.destroy();
+      reject(new Error("Auto-login timeout"));
+    }, 30000);
+
+    let hasSubmitted = false;
+
+    win.webContents.on('did-finish-load', async () => {
+      if (hasSubmitted) return; // Don't try to login again after submitting
+      try {
+        const hasLoginForm = await win.webContents.executeJavaScript(`
+          document.querySelector('input[type="password"]') !== null
+        `);
+
+        if (!hasLoginForm) {
+          // Maybe already logged in, or not a login page
+          clearTimeout(loginTimeout);
+          if (!win.isDestroyed()) win.destroy();
+          resolve(true);
+          return;
+        }
+
+        hasSubmitted = true;
+        const submitted = await win.webContents.executeJavaScript(`
+          (function() {
+            const userInputs = document.querySelectorAll('input[type="text"], input[type="email"], input[name*="user"], input[name*="log"], input[name*="email"]');
+            const passInputs = document.querySelectorAll('input[type="password"]');
+            
+            if (userInputs.length > 0 && passInputs.length > 0) {
+              let userField = Array.from(userInputs).find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || userInputs[0];
+              let passField = Array.from(passInputs).find(el => el.offsetWidth > 0 && el.offsetHeight > 0) || passInputs[0];
+              
+              userField.value = '${username.replace(/'/g, "\\'")}';
+              passField.value = '${password.replace(/'/g, "\\'")}';
+              
+              const form = userField.closest('form');
+              if (form) {
+                const btn = form.querySelector('input[type="submit"], button[type="submit"]');
+                if (btn) {
+                  btn.click();
+                  return true;
+                } else {
+                  form.submit();
+                  return true;
+                }
+              } else {
+                // Try to find a submit button nearby
+                const submitBtns = document.querySelectorAll('input[type="submit"], button[type="submit"], button');
+                for (let btn of submitBtns) {
+                  const text = (btn.innerText || btn.value || '').toLowerCase();
+                  if (text.includes('login') || text.includes('log in') || text.includes('sign in') || text.includes('connexion')) {
+                    btn.click();
+                    return true;
+                  }
+                }
+              }
+            }
+            return false;
+          })();
+        `);
+        
+        if (submitted) {
+          win.webContents.once('did-navigate', () => {
+            clearTimeout(loginTimeout);
+            if (!win.isDestroyed()) win.destroy();
+            resolve(true);
+          });
+          
+          setTimeout(() => {
+            clearTimeout(loginTimeout);
+            if (!win.isDestroyed()) {
+              win.destroy();
+              resolve(true);
+            }
+          }, 5000);
+        } else {
+          clearTimeout(loginTimeout);
+          if (!win.isDestroyed()) win.destroy();
+          resolve(false);
+        }
+
+      } catch (e) {
+        clearTimeout(loginTimeout);
+        if (!win.isDestroyed()) win.destroy();
+        reject(e);
+      }
+    });
+
+    let loginUrl = siteUrl;
+    try {
+      const urlObj = new URL(siteUrl);
+      if (siteUrl.includes('imhentai.xxx')) loginUrl = 'https://imhentai.xxx/login/';
+      else if (siteUrl.includes('nhentai.net')) loginUrl = 'https://nhentai.net/login/';
+      else if (siteUrl.includes('3hentai.net')) loginUrl = 'https://3hentai.net/login';
+      else if (!siteUrl.includes('login')) loginUrl = `${urlObj.origin}/wp-login.php`;
+    } catch(e) {}
+
+    win.loadURL(loginUrl);
+  });
 }
 
 async function fastFetchHtml(url, existingWin = null, taskState = null) {
@@ -366,21 +473,33 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
   });
 }
 
-// Helper function to fetch with a strict timeout to prevent hanging
+// Helper function to fetch with a strict timeout to prevent hanging, using Electron session for cookies
 async function safeGet(url, config = {}, taskState = null) {
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
+  
   try {
-    const getPromise = axiosInstance.get(url, {
-      ...config,
+    const scraperSession = session.fromPartition('persist:scraper');
+    const defaultUserAgent = session.defaultSession.getUserAgent();
+    const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
+    
+    const fetchOptions = {
+      headers: {
+        'User-Agent': cleanUserAgent,
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        ...(config.headers || {})
+      },
       signal: controller.signal
-    });
+    };
+
+    const fetchPromise = scraperSession.fetch(url, fetchOptions);
     
     const res = await Promise.race([
-      getPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Axios timeout')), 20000))
+      fetchPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 20000))
     ]);
     
     if (taskState && taskState.controllers) {
@@ -389,14 +508,29 @@ async function safeGet(url, config = {}, taskState = null) {
     }
     
     clearTimeout(timeoutId);
-    return res;
+    
+    if (!res.ok) {
+      const error = new Error(`HTTP error! status: ${res.status}`);
+      error.response = { status: res.status };
+      throw error;
+    }
+    
+    const contentType = res.headers.get('content-type') || '';
+    let data;
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      data = await res.text();
+    }
+    
+    return { data, status: res.status, headers: res.headers };
   } catch (err) {
     clearTimeout(timeoutId);
     throw err;
   }
 }
 
-export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
+export async function fetchGalleryLinks(url, taskId = null, settings = {}, onProgress = null) {
   let scraperWin = null;
   const taskState = { isCancelled: false, controllers: [], scraperWin: null };
   if (taskId) activeTasks.set(taskId, taskState);
@@ -409,6 +543,21 @@ export async function fetchGalleryLinks(url, taskId = null, onProgress = null) {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
     const links = [];
+
+    // Auto-login if credentials exist
+    if (settings && settings.accounts && settings.accounts.length > 0) {
+      const account = settings.accounts.find(acc => {
+        try { return hostname.includes(new URL(acc.url).hostname); } catch(e) { return false; }
+      });
+      if (account) {
+        try {
+          if (onProgress) onProgress("Logging in...");
+          await autoLogin(account.url, account.username, account.password);
+        } catch (e) {
+          console.error("Auto-login failed:", e);
+        }
+      }
+    }
 
     if (hostname.includes('imhentai.xxx')) {
       // If it's an artist/tag/search/group/parody/character page, get all gallery links
@@ -617,6 +766,21 @@ export async function startDownload(task, win, settings) {
     
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
+
+    // Auto-login if credentials exist
+    if (settings.accounts && settings.accounts.length > 0) {
+      const account = settings.accounts.find(acc => {
+        try { return hostname.includes(new URL(acc.url).hostname); } catch(e) { return false; }
+      });
+      if (account) {
+        try {
+          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Logging in..." });
+          await autoLogin(account.url, account.username, account.password);
+        } catch (e) {
+          console.error("Auto-login failed:", e);
+        }
+      }
+    }
 
     try {
       checkCancelled();
@@ -1051,13 +1215,38 @@ export async function startDownload(task, win, settings) {
         checkCancelled();
         let success = false;
         let retries = 3;
-        let fileName = `image_${String(i + 1).padStart(3, '0')}.jpg`;
+        let fileName = "Initializing...";
         
         while (retries >= 0 && !success && !taskState.isCancelled) {
           let controller;
           try {
+            const urlPath = new URL(imgUrl).pathname;
+            let baseFileName = path.basename(urlPath);
+            
+            // Fallback if no proper filename in URL
+            if (!baseFileName || !baseFileName.includes('.')) {
+              const ext = path.extname(urlPath) || '.jpg';
+              baseFileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
+            }
+            
+            const filePath = path.join(saveDir, baseFileName);
+            
+            // Resume support: check if file already exists
+            if (retries === 3 && await fs.pathExists(filePath)) {
+              const stats = await fs.stat(filePath);
+              if (stats.size > 0) {
+                downloadedCount++;
+                success = true;
+                break;
+              }
+            }
+
             if (retries < 3) {
-              fileName = `image_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+              const ext = path.extname(baseFileName);
+              const nameWithoutExt = path.basename(baseFileName, ext);
+              fileName = `${nameWithoutExt} (Retry ${3 - retries}/3)${ext}`;
+            } else {
+              fileName = baseFileName;
             }
             
             // Send progress update to show which file is currently being downloaded/retried
@@ -1099,10 +1288,6 @@ export async function startDownload(task, win, settings) {
             clearTimeout(timeoutId);
             
             if (!arrayBuffer) throw new Error('Empty buffer');
-            
-            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-            fileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
-            const filePath = path.join(saveDir, fileName);
             
             await fs.writeFile(filePath, Buffer.from(arrayBuffer));
             downloadedCount++;
@@ -1198,7 +1383,11 @@ export async function startDownload(task, win, settings) {
         }
       }
 
-      const baseDir = settings.directories[extractedLanguage] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
+      let baseDir = settings.directories[extractedLanguage] || settings.directories.other || path.join(app.getPath('downloads'), 'SnapCBZ', 'CBZ');
+      
+      if (isManhwa && settings.manhwaDirectory) {
+        baseDir = settings.manhwaDirectory;
+      }
       
       saveDir = path.join(baseDir, cleanCategory);
       await fs.ensureDir(saveDir);
@@ -1206,7 +1395,7 @@ export async function startDownload(task, win, settings) {
       finalFilename = `${title}.cbz`;
       const finalPath = path.join(saveDir, finalFilename);
       
-      const tempDir = path.join(app.getPath('temp'), 'snapcbz', crypto.randomBytes(8).toString('hex'));
+      const tempDir = path.join(app.getPath('temp'), 'snapcbz', id);
       await fs.ensureDir(tempDir);
       
       win.webContents.send('download-progress', { 
@@ -1232,8 +1421,24 @@ export async function startDownload(task, win, settings) {
         while (retries >= 0 && !success && !taskState.isCancelled) {
           let controller;
           try {
+            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
+            const baseFileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
+            const filePath = path.join(tempDir, baseFileName);
+            
+            // Resume support: check if file already exists in temp directory
+            if (retries === 3 && await fs.pathExists(filePath)) {
+              const stats = await fs.stat(filePath);
+              if (stats.size > 0) {
+                downloadedCount++;
+                success = true;
+                break;
+              }
+            }
+
             if (retries < 3) {
-              fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3).jpg`;
+              fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3)${ext}`;
+            } else {
+              fileName = baseFileName;
             }
             
             // Send progress update to show which file is currently being downloaded/retried
@@ -1279,9 +1484,7 @@ export async function startDownload(task, win, settings) {
             
             if (!arrayBuffer) throw new Error('Empty buffer');
             
-            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-            fileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
-            await fs.writeFile(path.join(tempDir, fileName), Buffer.from(arrayBuffer));
+            await fs.writeFile(filePath, Buffer.from(arrayBuffer));
             downloadedCount++;
             success = true;
           } catch (err) {

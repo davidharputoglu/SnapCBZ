@@ -7,6 +7,7 @@ import {
   AlertCircle,
   Loader2,
   Trash2,
+  RefreshCw,
   Globe2,
   FolderOpen,
   XCircle,
@@ -138,7 +139,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
   onRemove,
   onCancel,
 }) => {
-  const { settings } = useAppStore();
+  const { settings, resumeTask } = useAppStore();
   const { t } = useTranslation();
 
   const translateDynamicString = (str: string | undefined) => {
@@ -298,13 +299,24 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
               <XCircle className="w-5 h-5" />
             </button>
           ) : (
-            <button
-              onClick={onRemove}
-              className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
-              title="Remove task"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
+            <div className="flex items-center">
+              {(task.status === "error" || task.status === "ignored" || task.status === "completed") && (
+                <button
+                  onClick={() => resumeTask(task.id)}
+                  className="p-2 text-muted-foreground hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/30 rounded-lg transition-colors"
+                  title={task.status === "completed" ? "Rescan for new images" : "Retry task"}
+                >
+                  <RefreshCw className="w-5 h-5" />
+                </button>
+              )}
+              <button
+                onClick={onRemove}
+                className="p-2 text-muted-foreground hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                title="Remove task"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            </div>
           )}
         </div>
       </div>

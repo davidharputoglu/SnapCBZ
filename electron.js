@@ -119,9 +119,9 @@ ipcMain.on('cancel-task', (event, taskId) => {
   }
 });
 
-ipcMain.handle('fetch-gallery-links', async (event, url, taskId) => {
+ipcMain.handle('fetch-gallery-links', async (event, url, taskId, settings) => {
   try {
-    return await fetchGalleryLinks(url, taskId, (msg) => {
+    return await fetchGalleryLinks(url, taskId, settings, (msg) => {
       event.sender.send('fetch-gallery-progress', { id: taskId, message: msg });
     });
   } catch (error) {

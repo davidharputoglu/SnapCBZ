@@ -14,6 +14,13 @@ export interface CustomColor {
   hex: string;
 }
 
+export interface Account {
+  id: string;
+  url: string;
+  username: string;
+  password?: string;
+}
+
 export interface Settings {
   appLanguage: string;
   directories: Record<string, string>;
@@ -25,6 +32,8 @@ export interface Settings {
   lightWallpaper?: string | null;
   enableManhwa?: boolean;
   manhwaFormat?: "cbz" | "images";
+  manhwaDirectory?: string;
+  accounts?: Account[];
 }
 
 export interface DownloadTask {
@@ -63,6 +72,7 @@ interface AppState {
   addTasks: (urls: string[], type?: "cbz" | "images") => void;
   removeTask: (id: string) => void;
   cancelTask: (id: string) => void;
+  resumeTask: (id: string) => void;
   clearCompleted: () => void;
 }
 
@@ -103,8 +113,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
     return translations[lang]?.[key] || translations.en[key] || key;
   };
 
-  const [tasks, setTasks] = useState<DownloadTask[]>([]);
+  const [tasks, setTasks] = useState<DownloadTask[]>(() => {
+    try {
+      const savedTasks = localStorage.getItem("snapcbz_tasks");
+      if (savedTasks) {
+        const parsed = JSON.parse(savedTasks);
+        return parsed.map((t: DownloadTask) => {
+          if (["queued", "scraping", "downloading", "downloading_images", "extracting", "converting"].includes(t.status)) {
+            return { ...t, status: "error", error: "Interrupted - Click Retry to resume" };
+          }
+          return t;
+        });
+      }
+    } catch (e) {
+      console.error("Failed to load tasks", e);
+    }
+    return [];
+  });
   const settingsRef = useRef(settings);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("snapcbz_tasks", JSON.stringify(tasks));
+    } catch (e) {
+      console.error("Failed to save tasks", e);
+    }
+  }, [tasks]);
 
   useEffect(() => {
     settingsRef.current = settings;
@@ -250,7 +284,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
           }, ...prev]);
 
           try {
-            const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url, tempId);
+            const galleryLinks = await ipcRenderer.invoke('fetch-gallery-links', url, tempId, settingsRef.current);
             
             // Remove the temporary task
             setTasks((prev) => prev.filter(t => t.id !== tempId));
@@ -355,6 +389,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       setTasks((prev) =>
         prev.map((t) => (t.id === id ? { ...t, status: "error", error: "Download cancelled by user" } : t)),
       );
+    }
+  };
+
+  const resumeTask = (id: string) => {
+    const task = tasks.find(t => t.id === id);
+    if (!task) return;
+    
+    const newTask = { ...task, status: "queued" as const, error: undefined, progress: 0 };
+    setTasks(prev => prev.map(t => t.id === id ? newTask : t));
+    
+    if (ipcRenderer) {
+      ipcRenderer.send("start-download", { task: newTask, settings: settingsRef.current });
     }
   };
 
@@ -471,6 +517,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
         addTasks,
         removeTask,
         cancelTask,
+        resumeTask,
         clearCompleted,
       }}
     >

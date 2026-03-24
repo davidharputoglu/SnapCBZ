@@ -23,6 +23,10 @@ export const SettingsView: React.FC = () => {
   const [newColorHex, setNewColorHex] = useState("#14b8a6");
   const [customSiteUrl, setCustomSiteUrl] = useState("");
 
+  const [newAccountUrl, setNewAccountUrl] = useState("");
+  const [newAccountUsername, setNewAccountUsername] = useState("");
+  const [newAccountPassword, setNewAccountPassword] = useState("");
+
   // Ensure languages exists (fallback for older local storage data)
   const languages = settings.languages || [
     { id: "fr", name: "French (Français)" },
@@ -67,6 +71,35 @@ export const SettingsView: React.FC = () => {
       delete newDirs[id];
       updateSettings({ languages: newLangs, directories: newDirs });
     }
+  };
+
+  const handleAddAccount = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAccountUrl || !newAccountUsername) return;
+    
+    let url = newAccountUrl;
+    if (!url.startsWith('http')) url = 'https://' + url;
+    
+    const newAccount = {
+      id: Math.random().toString(36).substring(2, 9),
+      url,
+      username: newAccountUsername,
+      password: newAccountPassword
+    };
+    
+    updateSettings({
+      accounts: [...(settings.accounts || []), newAccount]
+    });
+    
+    setNewAccountUrl("");
+    setNewAccountUsername("");
+    setNewAccountPassword("");
+  };
+
+  const handleRemoveAccount = (id: string) => {
+    updateSettings({
+      accounts: (settings.accounts || []).filter(a => a.id !== id)
+    });
   };
 
   const handleAddCustomColor = () => {
@@ -231,107 +264,59 @@ export const SettingsView: React.FC = () => {
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
-                  IM
+            <div className="space-y-4">
+              {(settings.accounts || []).map((account) => (
+                <div key={account.id} className="flex items-center justify-between p-3 bg-muted/30 border border-border rounded-xl">
+                  <div className="flex flex-col overflow-hidden">
+                    <span className="font-medium text-sm text-foreground truncate">{account.url}</span>
+                    <span className="text-xs text-muted-foreground truncate">{account.username}</span>
+                  </div>
+                  <button
+                    onClick={() => handleRemoveAccount(account.id)}
+                    className="p-2 text-red-500 hover:bg-red-500/10 rounded-lg transition-colors shrink-0 ml-2"
+                    title={(t("set_account_delete") as string) || "Delete"}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-                <div>
-                  <h3 className="font-medium text-foreground">IMHentai</h3>
-                  <p className="text-xs text-muted-foreground">imhentai.xxx</p>
+              ))}
+              
+              <form onSubmit={handleAddAccount} className="flex flex-col gap-2 mt-4 pt-4 border-t border-border">
+                <input
+                  type="url"
+                  value={newAccountUrl}
+                  onChange={(e) => setNewAccountUrl(e.target.value)}
+                  placeholder={(t("set_account_url") as string) || "Site URL (https://...)"}
+                  className="px-4 py-2 bg-muted/30 border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                  required
+                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newAccountUsername}
+                    onChange={(e) => setNewAccountUsername(e.target.value)}
+                    placeholder={(t("set_account_username") as string) || "Username"}
+                    className="flex-1 px-4 py-2 bg-muted/30 border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    required
+                  />
+                  <input
+                    type="password"
+                    value={newAccountPassword}
+                    onChange={(e) => setNewAccountPassword(e.target.value)}
+                    placeholder={(t("set_account_password") as string) || "Password"}
+                    className="flex-1 px-4 py-2 bg-muted/30 border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
+                    required
+                  />
                 </div>
-              </div>
-              <button
-                onClick={() => {
-                  try {
-                    const { ipcRenderer } = window.require('electron');
-                    ipcRenderer.invoke('open-login-window', 'https://imhentai.xxx/login/');
-                  } catch (e) {
-                    console.error("Electron not available");
-                  }
-                }}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
-              >
-                {t("set_login") as string}
-              </button>
-            </div>
-            
-            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
-                  NH
-                </div>
-                <div>
-                  <h3 className="font-medium text-foreground">nHentai</h3>
-                  <p className="text-xs text-muted-foreground">nhentai.net</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  try {
-                    const { ipcRenderer } = window.require('electron');
-                    ipcRenderer.invoke('open-login-window', 'https://nhentai.net/login/');
-                  } catch (e) {
-                    console.error("Electron not available");
-                  }
-                }}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
-              >
-                {t("set_login") as string}
-              </button>
-            </div>
-            
-            <div className="flex items-center justify-between p-4 bg-muted/30 rounded-xl border border-border">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
-                  3H
-                </div>
-                <div>
-                  <h3 className="font-medium text-foreground">3hentai</h3>
-                  <p className="text-xs text-muted-foreground">3hentai.net</p>
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  try {
-                    const { ipcRenderer } = window.require('electron');
-                    ipcRenderer.invoke('open-login-window', 'https://3hentai.net/login');
-                  } catch (e) {
-                    console.error("Electron not available");
-                  }
-                }}
-                className="px-4 py-2 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors text-sm"
-              >
-                {t("set_login") as string}
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2 pt-2 mt-4">
-              <input
-                type="url"
-                value={customSiteUrl}
-                onChange={(e) => setCustomSiteUrl(e.target.value)}
-                placeholder={(t("set_custom_site_url") as string) || "https://..."}
-                className="flex-1 px-4 py-2 bg-muted/30 border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-              />
-              <button
-                onClick={() => {
-                  if (!customSiteUrl) return;
-                  let url = customSiteUrl;
-                  if (!url.startsWith('http')) url = 'https://' + url;
-                  try {
-                    const { ipcRenderer } = window.require('electron');
-                    ipcRenderer.invoke('open-login-window', url);
-                    setCustomSiteUrl("");
-                  } catch (e) {
-                    console.error("Electron not available");
-                  }
-                }}
-                disabled={!customSiteUrl.trim()}
-                className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-              >
-                {(t("set_open_login") as string) || "Open"}
-              </button>
+                <button
+                  type="submit"
+                  disabled={!newAccountUrl.trim() || !newAccountUsername.trim()}
+                  className="flex items-center justify-center gap-2 px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed mt-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  {(t("set_add_account") as string) || "Add Account"}
+                </button>
+              </form>
             </div>
           </div>
         </section>
@@ -406,39 +391,12 @@ export const SettingsView: React.FC = () => {
             </div>
 
             <div className="p-4 bg-muted/50 rounded-2xl border border-border">
-              <h3 className="font-medium text-foreground mb-2">
-                {t("set_accounts")}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                {t("set_accounts_desc")}
-              </p>
-              <div className="flex items-center gap-2">
-                <input
-                  type="url"
-                  value={customSiteUrl}
-                  onChange={(e) => setCustomSiteUrl(e.target.value)}
-                  placeholder={(t("set_custom_site_url") as string) || "https://..."}
-                  className="flex-1 px-4 py-2 bg-background border border-border rounded-lg text-sm text-foreground focus:ring-2 focus:ring-primary focus:border-transparent transition-all"
-                />
-                <button
-                  onClick={() => {
-                    if (!customSiteUrl) return;
-                    let url = customSiteUrl;
-                    if (!url.startsWith('http')) url = 'https://' + url;
-                    try {
-                      const { ipcRenderer } = window.require('electron');
-                      ipcRenderer.invoke('open-login-window', url);
-                      setCustomSiteUrl("");
-                    } catch (e) {
-                      console.error("Electron not available");
-                    }
-                  }}
-                  disabled={!customSiteUrl.trim()}
-                  className="px-4 py-2 bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg font-medium transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-                >
-                  {(t("set_open_login") as string) || "Open"}
-                </button>
-              </div>
+              <DirectoryInput
+                label={t("set_manhwa_dir")}
+                value={settings.manhwaDirectory || ""}
+                onChange={(v) => updateSettings({ manhwaDirectory: v })}
+                icon={<Folder className="w-5 h-5 text-muted-foreground" />}
+              />
             </div>
           </div>
         </section>
