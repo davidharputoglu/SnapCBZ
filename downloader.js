@@ -723,6 +723,48 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           }
         }
       }
+    } else if (settings.enableManhwa !== false) {
+      // Generic Manhwa/Webtoon chapter extraction
+      try {
+        const html = await fastFetchHtml(url, null, taskState);
+        const $ = cheerio.load(html);
+        
+        // Common selectors for chapter links on Manhwa sites
+        const chapterSelectors = [
+          '.wp-manga-chapter a',
+          'li.wp-manga-chapter a',
+          '.chapter-list a',
+          '.listing-chapters_wrap a',
+          '.chbox a',
+          '.chapter-title-rtl a',
+          'div.chapter-list a',
+          'ul.main.version-chap li a',
+          '.eplister ul li a'
+        ];
+        
+        let foundChapters = [];
+        for (const selector of chapterSelectors) {
+          $(selector).each((i, el) => {
+            const href = $(el).attr('href');
+            if (href && (href.includes('chapter') || href.includes('chapitre') || href.includes('chap-') || href.match(/c\d+/))) {
+              foundChapters.push(new URL(href, url).href);
+            }
+          });
+          if (foundChapters.length > 0) break;
+        }
+        
+        if (foundChapters.length > 0) {
+          // Usually chapters are listed from newest to oldest, so we reverse them to download in order
+          foundChapters.reverse();
+          links.push(...foundChapters);
+          // Remove the main page URL from the links list if we found chapters
+          if (links[0] === url) {
+            links.shift();
+          }
+        }
+      } catch (e) {
+        console.error("Generic Manhwa chapter extraction failed:", e);
+      }
     }
 
     if (scraperWin) {
@@ -1220,33 +1262,67 @@ export async function startDownload(task, win, settings) {
         while (retries >= 0 && !success && !taskState.isCancelled) {
           let controller;
           try {
-            const urlPath = new URL(imgUrl).pathname;
-            let baseFileName = path.basename(urlPath);
+            let nameWithoutExt = '';
+            let originalBaseFileName = '';
             
-            // Fallback if no proper filename in URL
-            if (!baseFileName || !baseFileName.includes('.')) {
-              const ext = path.extname(urlPath) || '.jpg';
-              baseFileName = `image_${String(i + 1).padStart(3, '0')}${ext}`;
+            if (!imgUrl.startsWith('data:image/')) {
+              const urlPath = new URL(imgUrl).pathname;
+              originalBaseFileName = path.basename(urlPath);
+              
+              // Fallback if no proper filename in URL
+              if (!originalBaseFileName || !originalBaseFileName.includes('.')) {
+                nameWithoutExt = `image_${String(i + 1).padStart(3, '0')}`;
+              } else {
+                const ext = path.extname(originalBaseFileName);
+                nameWithoutExt = path.basename(originalBaseFileName, ext);
+              }
+            } else {
+              nameWithoutExt = `image_${String(i + 1).padStart(3, '0')}`;
             }
             
-            const filePath = path.join(saveDir, baseFileName);
-            
-            // Resume support: check if file already exists
-            if (retries === 3 && await fs.pathExists(filePath)) {
-              const stats = await fs.stat(filePath);
-              if (stats.size > 0) {
-                downloadedCount++;
-                success = true;
-                break;
+            // Resume support: check if file already exists with any valid image extension
+            if (retries === 3) {
+              const files = await fs.readdir(saveDir).catch(() => []);
+              const existingFile = files.find(f => {
+                const fExt = path.extname(f);
+                const fName = path.basename(f, fExt);
+                return fName === nameWithoutExt && ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'].includes(fExt.toLowerCase());
+              });
+              
+              if (existingFile) {
+                const stats = await fs.stat(path.join(saveDir, existingFile));
+                if (stats.size > 0) {
+                  downloadedCount++;
+                  success = true;
+                  break;
+                }
               }
             }
 
+            if (imgUrl.startsWith('data:image/')) {
+              const matches = imgUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+              if (matches && matches.length === 3) {
+                let ext = '.' + matches[1].replace('jpeg', 'jpg');
+                const finalBaseFileName = `${nameWithoutExt}${ext}`;
+                const filePath = path.join(saveDir, finalBaseFileName);
+                await fs.writeFile(filePath, Buffer.from(matches[2], 'base64'));
+                downloadedCount++;
+                success = true;
+                break;
+              } else {
+                throw new Error('Invalid base64 image data');
+              }
+            }
+
+            let currentExt = path.extname(originalBaseFileName) || '.jpg';
+            if (currentExt.toLowerCase() === '.html' || currentExt.toLowerCase() === '.htm') {
+              currentExt = '.jpg';
+            }
+
             if (retries < 3) {
-              const ext = path.extname(baseFileName);
-              const nameWithoutExt = path.basename(baseFileName, ext);
-              fileName = `${nameWithoutExt} (Retry ${3 - retries}/3)${ext}`;
+              fileName = `${nameWithoutExt} (Retry ${3 - retries}/3)${currentExt}`;
             } else {
-              fileName = baseFileName;
+              fileName = `${nameWithoutExt}${currentExt}`;
             }
             
             // Send progress update to show which file is currently being downloaded/retried
@@ -1279,6 +1355,22 @@ export async function startDownload(task, win, settings) {
               clearTimeout(timeoutId);
               throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
             }
+            
+            const contentType = (imgRes.headers.get('content-type') || '').toLowerCase();
+            if (contentType.includes('text/html')) {
+              clearTimeout(timeoutId);
+              throw new Error('Server returned HTML instead of an image (possible Cloudflare block or invalid link)');
+            }
+            
+            let finalExt = currentExt;
+            if (contentType.includes('image/jpeg')) finalExt = '.jpg';
+            else if (contentType.includes('image/png')) finalExt = '.png';
+            else if (contentType.includes('image/webp')) finalExt = '.webp';
+            else if (contentType.includes('image/avif')) finalExt = '.avif';
+            else if (contentType.includes('image/gif')) finalExt = '.gif';
+            
+            const finalBaseFileName = `${nameWithoutExt}${finalExt}`;
+            const filePath = path.join(saveDir, finalBaseFileName);
             
             const bufferPromise = imgRes.arrayBuffer().catch(() => {});
             const arrayBuffer = await Promise.race([
@@ -1421,24 +1513,51 @@ export async function startDownload(task, win, settings) {
         while (retries >= 0 && !success && !taskState.isCancelled) {
           let controller;
           try {
-            const ext = path.extname(new URL(imgUrl).pathname) || '.jpg';
-            const baseFileName = `page_${String(i + 1).padStart(3, '0')}${ext}`;
-            const filePath = path.join(tempDir, baseFileName);
+            const nameWithoutExt = `page_${String(i + 1).padStart(3, '0')}`;
             
             // Resume support: check if file already exists in temp directory
-            if (retries === 3 && await fs.pathExists(filePath)) {
-              const stats = await fs.stat(filePath);
-              if (stats.size > 0) {
-                downloadedCount++;
-                success = true;
-                break;
+            if (retries === 3) {
+              const files = await fs.readdir(tempDir).catch(() => []);
+              const existingFile = files.find(f => {
+                const fExt = path.extname(f);
+                const fName = path.basename(f, fExt);
+                return fName === nameWithoutExt && ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'].includes(fExt.toLowerCase());
+              });
+              
+              if (existingFile) {
+                const stats = await fs.stat(path.join(tempDir, existingFile));
+                if (stats.size > 0) {
+                  downloadedCount++;
+                  success = true;
+                  break;
+                }
               }
             }
 
+            if (imgUrl.startsWith('data:image/')) {
+              const matches = imgUrl.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+              if (matches && matches.length === 3) {
+                let ext = '.' + matches[1].replace('jpeg', 'jpg');
+                const finalBaseFileName = `${nameWithoutExt}${ext}`;
+                const filePath = path.join(tempDir, finalBaseFileName);
+                await fs.writeFile(filePath, Buffer.from(matches[2], 'base64'));
+                downloadedCount++;
+                success = true;
+                break;
+              } else {
+                throw new Error('Invalid base64 image data');
+              }
+            }
+
+            let currentExt = path.extname(new URL(imgUrl).pathname) || '.jpg';
+            if (currentExt.toLowerCase() === '.html' || currentExt.toLowerCase() === '.htm') {
+              currentExt = '.jpg';
+            }
+
             if (retries < 3) {
-              fileName = `page_${String(i + 1).padStart(3, '0')} (Retry ${3 - retries}/3)${ext}`;
+              fileName = `${nameWithoutExt} (Retry ${3 - retries}/3)${currentExt}`;
             } else {
-              fileName = baseFileName;
+              fileName = `${nameWithoutExt}${currentExt}`;
             }
             
             // Send progress update to show which file is currently being downloaded/retried
@@ -1474,6 +1593,22 @@ export async function startDownload(task, win, settings) {
               clearTimeout(timeoutId);
               throw new Error(`HTTP error! status: ${imgRes ? imgRes.status : 'unknown'}`);
             }
+            
+            const contentType = (imgRes.headers.get('content-type') || '').toLowerCase();
+            if (contentType.includes('text/html')) {
+              clearTimeout(timeoutId);
+              throw new Error('Server returned HTML instead of an image (possible Cloudflare block or invalid link)');
+            }
+            
+            let finalExt = currentExt;
+            if (contentType.includes('image/jpeg')) finalExt = '.jpg';
+            else if (contentType.includes('image/png')) finalExt = '.png';
+            else if (contentType.includes('image/webp')) finalExt = '.webp';
+            else if (contentType.includes('image/avif')) finalExt = '.avif';
+            else if (contentType.includes('image/gif')) finalExt = '.gif';
+            
+            const finalBaseFileName = `${nameWithoutExt}${finalExt}`;
+            const filePath = path.join(tempDir, finalBaseFileName);
             
             const bufferPromise = imgRes.arrayBuffer().catch(() => {});
             const arrayBuffer = await Promise.race([
