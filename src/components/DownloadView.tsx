@@ -192,6 +192,14 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     const scrapingPageMatch = str.match(/^Scraping links \(page (\d+)\)\.\.\.$/);
     if (scrapingPageMatch) return t("status_scraping_page" as any, { page: scrapingPageMatch[1] });
     
+    const bypassingCfMatch = str.match(/^Bypassing Cloudflare \((\d+)s\)\.\.\.$/);
+    if (bypassingCfMatch) return t("status_bypassing_cf" as any, { time: bypassingCfMatch[1] });
+    
+    const loadingPageMatch = str.match(/^Loading page \((\d+)s\)\.\.\.$/);
+    if (loadingPageMatch) return t("status_loading_page" as any, { time: loadingPageMatch[1] });
+    
+    if (str === "Logging in...") return t("status_logging_in" as any);
+    
     return str;
   };
 

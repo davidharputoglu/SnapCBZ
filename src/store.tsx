@@ -268,10 +268,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
       } else {
         // CBZ Mode
         
-        // Check if it's an artist/tag page that needs expanding
+        // Check if it's an artist/tag page that needs expanding or a manhwa main page
         let urlsToProcess = [url];
         
-        if (ipcRenderer && (url.includes('/artist/') || url.includes('/tag/') || url.includes('/search/') || url.includes('/group/') || url.includes('/parody/') || url.includes('/character/'))) {
+        if (ipcRenderer) {
           // Add a temporary task to show progress
           const tempId = Math.random().toString(36).substring(2, 9);
           setTasks((prev) => [{
@@ -292,18 +292,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({
             if (galleryLinks && galleryLinks.length > 0) {
               urlsToProcess = galleryLinks;
             } else {
-              // If it's an artist page and we found no links, don't try to download the artist page itself
-              urlsToProcess = [];
-              const id = Math.random().toString(36).substring(2, 9);
-              setTasks((prev) => [{
-                id,
-                url,
-                type: "cbz",
-                filename: `Parse error: ${new URL(url).pathname}`,
-                status: "error",
-                progress: 0,
-                error: "No links found. Cloudflare might have blocked access or the page is empty."
-              }, ...prev]);
+              // If it's an artist page and we found no links, it would have thrown an error.
+              // If it returns empty, it means it's a single gallery/chapter page, so just process the original URL.
+              urlsToProcess = [url];
             }
           } catch (e: any) {
             console.error("Failed to fetch gallery links", e);

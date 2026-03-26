@@ -180,7 +180,7 @@ async function autoLogin(siteUrl, username, password) {
   return loginPromise;
 }
 
-async function fastFetchHtml(url, existingWin = null, taskState = null) {
+export async function fastFetchHtml(url, existingWin = null, taskState = null, onProgress = null) {
   try {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     
@@ -269,7 +269,7 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
     }
 
     if (html.includes('Just a moment') || html.includes('Cloudflare') || html.includes('Verify you are human')) {
-      return await fetchHtmlWithElectron(url, existingWin, taskState);
+      return await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
     }
     
     return html;
@@ -278,7 +278,7 @@ async function fastFetchHtml(url, existingWin = null, taskState = null) {
   }
 }
 
-async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) {
+async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, onProgress = null) {
   const executeFetch = async () => {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
@@ -399,6 +399,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
             cloudflareTime += 1;
             lastState = `Cloudflare detected: title="${title}", bodyText.length=${bodyText.length}`;
             console.log(lastState);
+            if (onProgress) onProgress(`Bypassing Cloudflare (${cloudflareTime}s)...`);
             if (!win.isVisible()) {
               win.show();
               win.focus();
@@ -415,6 +416,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null) 
           if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
             lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
             console.log(lastState);
+            if (onProgress) onProgress(`Loading page (${timeElapsed}s)...`);
             if (timeElapsed > 5 && !win.isVisible()) {
               win.show();
               win.focus();
@@ -619,7 +621,14 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           visitedUrls.add(currentUrl);
           
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
-          const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
+          let html = '';
+          try {
+            html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
+          } catch (e) {
+            console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
+            const res = await safeGet(currentUrl, {}, taskState);
+            html = res.data;
+          }
           const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -664,7 +673,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            html = await fastFetchHtml(currentUrl, null, taskState);
+            html = await fastFetchHtml(currentUrl, null, taskState, onProgress);
           } catch (e) {
             const res = await safeGet(currentUrl);
             html = res.data;
@@ -728,7 +737,14 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           visitedUrls.add(currentUrl);
           
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
-          const html = await fastFetchHtml(currentUrl, scraperWin, taskState);
+          let html = '';
+          try {
+            html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
+          } catch (e) {
+            console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
+            const res = await safeGet(currentUrl, {}, taskState);
+            html = res.data;
+          }
           const $ = cheerio.load(html);
           let found = 0;
           $('.gallery a.cover').each((i, el) => {
@@ -763,40 +779,78 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
     } else if (settings.enableManhwa !== false) {
       // Generic Manhwa/Webtoon chapter extraction
       try {
-        const html = await fastFetchHtml(url, null, taskState);
+        let html = '';
+        try {
+          html = await fastFetchHtml(url, null, taskState, onProgress);
+        } catch (e) {
+          console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          const res = await safeGet(url, {}, taskState);
+          html = res.data;
+        }
         const $ = cheerio.load(html);
         
-        // Common selectors for chapter links on Manhwa sites
-        const chapterSelectors = [
-          '.wp-manga-chapter a',
-          'li.wp-manga-chapter a',
-          '.chapter-list a',
-          '.listing-chapters_wrap a',
-          '.chbox a',
-          '.chapter-title-rtl a',
-          'div.chapter-list a',
-          'ul.main.version-chap li a',
-          '.eplister ul li a'
-        ];
+        // Check if it's already a chapter page (has images in common reader containers)
+        const isChapterPage = $('.reading-content img, .page-break img, #vungdoc img, .vung_doc img, .container-chapter img, #readerarea img, .chapter-video-frame img, .chapter-content img, .entry-content img').length > 0;
         
-        let foundChapters = [];
-        for (const selector of chapterSelectors) {
-          $(selector).each((i, el) => {
-            const href = $(el).attr('href');
-            if (href && (href.includes('chapter') || href.includes('chapitre') || href.includes('chap-') || href.match(/c\d+/))) {
-              foundChapters.push(new URL(href, url).href);
+        if (!isChapterPage) {
+          // Common selectors for chapter links on Manhwa sites
+          const chapterSelectors = [
+            '.wp-manga-chapter a',
+            'li.wp-manga-chapter a',
+            '.chapter-list a',
+            '.listing-chapters_wrap a',
+            '.chbox a',
+            '.chapter-title-rtl a',
+            'div.chapter-list a',
+            'ul.main.version-chap li a',
+            '.eplister ul li a',
+            '#chapterlist .eph-num a',
+            '.clstyle li a',
+            '.lchx a',
+            '.chapter-link',
+            '.list-chapters a',
+            'ul.chapters li a',
+            '.episodelist ul li a',
+            '#chapter-list a',
+            '.chapters-list a',
+            '.chapters-wrapper a',
+            '.chapter-item a',
+            '.chap-list a',
+            'ul.chap_list li a',
+            '.list-chap a',
+            '.chapter-wrap a',
+            '.chapter-class a',
+            '.chapter-name a',
+            'a.chapter'
+          ];
+          
+          let foundChapters = [];
+          for (const selector of chapterSelectors) {
+            $(selector).each((i, el) => {
+              const href = $(el).attr('href');
+              if (href && !href.includes('javascript:') && href !== '#') {
+                const lowerHref = href.toLowerCase();
+                const lowerText = $(el).text().toLowerCase();
+                
+                // Filter out obvious non-chapter links that might be in the list
+                if (lowerHref.includes('/download') || lowerHref.includes('/report') || lowerHref.includes('discord.gg') || lowerHref.includes('facebook.com')) {
+                  return; // Skip
+                }
+                
+                foundChapters.push(new URL(href, url).href);
+              }
+            });
+            if (foundChapters.length > 0) break;
+          }
+          
+          if (foundChapters.length > 0) {
+            // Usually chapters are listed from newest to oldest, so we reverse them to download in order
+            foundChapters.reverse();
+            links.push(...foundChapters);
+            // Remove the main page URL from the links list if we found chapters
+            if (links[0] === url) {
+              links.shift();
             }
-          });
-          if (foundChapters.length > 0) break;
-        }
-        
-        if (foundChapters.length > 0) {
-          // Usually chapters are listed from newest to oldest, so we reverse them to download in order
-          foundChapters.reverse();
-          links.push(...foundChapters);
-          // Remove the main page URL from the links list if we found chapters
-          if (links[0] === url) {
-            links.shift();
           }
         }
       } catch (e) {
@@ -977,7 +1031,7 @@ export async function startDownload(task, win, settings) {
       } else if (hostname.includes('3hentai.net')) {
         let html = '';
         try {
-          html = await fastFetchHtml(url, null, taskState);
+          html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
           const res = await safeGet(url, {}, taskState);
           html = res.data;
@@ -1034,7 +1088,14 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
-        const html = await fastFetchHtml(url, null, taskState);
+        let html = '';
+        try {
+          html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+        } catch (e) {
+          console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          const res = await safeGet(url, {}, taskState);
+          html = res.data;
+        }
         const $ = cheerio.load(html);
         title = $('h1').text().trim();
         
@@ -1177,7 +1238,7 @@ export async function startDownload(task, win, settings) {
         try {
           let html = '';
           try {
-            html = await fastFetchHtml(url, null, taskState);
+            html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
           } catch (e) {
             console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
             const res = await safeGet(url, {}, taskState);
@@ -1206,6 +1267,9 @@ export async function startDownload(task, win, settings) {
             }
           }
           
+          // Pad chapter numbers with zeros so they sort correctly (e.g., "Chapter 1" -> "Chapter 001")
+          title = title.replace(/\b(\d+)\b/g, (match) => match.padStart(3, '0'));
+          
           // Common manhwa/manga reader image selectors (Madara theme, etc.)
           const selectors = [
             '.reading-content img',
@@ -1231,8 +1295,13 @@ export async function startDownload(task, win, settings) {
             });
             if (imageUrls.length > 0) break;
           }
+          
+          if (imageUrls.length === 0) {
+            throw new Error("No chapter images found. This might be a main page instead of a chapter, or the site is not supported.");
+          }
         } catch (e) {
           console.error("Generic scraper failed, might need Cloudflare bypass", e);
+          throw e; // Re-throw to prevent generic fallback
         }
       }
     } catch (scrapeError) {
@@ -1247,10 +1316,10 @@ export async function startDownload(task, win, settings) {
     if (imageUrls.length === 0) {
       let html = '';
       if (hostname.includes('nhentai.net')) {
-        html = await fastFetchHtml(url, null, taskState);
+        html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
       } else if (!hostname.includes('imhentai.xxx')) {
         try {
-          html = await fastFetchHtml(url, null, taskState);
+          html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           const response = await safeGet(url, {}, taskState);
