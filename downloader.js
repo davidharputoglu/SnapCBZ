@@ -426,21 +426,29 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             return; // Wait for next interval
           }
           
-          const html = await executeWithTimeout(`
-            (async () => {
-              window.scrollTo(0, document.body.scrollHeight);
-              await new Promise(r => setTimeout(r, 500));
-              window.scrollTo(0, document.body.scrollHeight);
-              await new Promise(r => setTimeout(r, 500));
-              return document.documentElement.outerHTML;
-            })();
-          `, 3000);
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(checkTimeout);
-            clearTimeout(timeout);
-            if (!existingWin) { try { win.destroy(); } catch (e) {} }
-            resolve(html);
+          // Success!
+          try {
+            // Scroll down to trigger lazy loading
+            await executeWithTimeout(`
+              (async () => {
+                if (document.body) window.scrollTo(0, document.body.scrollHeight);
+                await new Promise(r => setTimeout(r, 500));
+                if (document.body) window.scrollTo(0, document.body.scrollHeight);
+                await new Promise(r => setTimeout(r, 500));
+                return document.documentElement.outerHTML;
+              })();
+            `, 3000).then(html => {
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(checkTimeout);
+                clearTimeout(timeout);
+                if (!existingWin) { try { win.destroy(); } catch (e) {} }
+                resolve(html);
+              }
+            });
+          } catch (innerError) {
+            console.log("Error during scrolling or HTML extraction:", innerError.message);
+            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
           }
         } catch (e) {
           // Ignore errors during execution, try again
