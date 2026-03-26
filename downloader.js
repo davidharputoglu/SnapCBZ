@@ -378,7 +378,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           const title = await executeWithTimeout('document.title || ""');
           const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
           
-          if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied')) {
+          if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied') || title.includes('403 Forbidden')) {
             if (!resolved) {
               resolved = true;
               clearTimeout(checkTimeout);
@@ -426,7 +426,15 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             return; // Wait for next interval
           }
           
-          const html = await executeWithTimeout('document.documentElement.outerHTML');
+          const html = await executeWithTimeout(`
+            (async () => {
+              window.scrollTo(0, document.body.scrollHeight);
+              await new Promise(r => setTimeout(r, 500));
+              window.scrollTo(0, document.body.scrollHeight);
+              await new Promise(r => setTimeout(r, 500));
+              return document.documentElement.outerHTML;
+            })();
+          `, 3000);
           if (!resolved) {
             resolved = true;
             clearTimeout(checkTimeout);
@@ -500,6 +508,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
     if (activeElectronScrapers < maxConcurrentScrapers) {
       task();
     } else {
+      if (onProgress) onProgress("Queued for scraping...");
       electronScraperQueue.push(task);
     }
   });
@@ -821,7 +830,13 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             '.chapter-wrap a',
             '.chapter-class a',
             '.chapter-name a',
-            'a.chapter'
+            'a.chapter',
+            'a[href*="chapter-"]',
+            'a[href*="/chapter/"]',
+            'a[href*="/chapitre-"]',
+            'a[href*="/ch-"]',
+            'a[href*="/c-"]',
+            '.version-chap a'
           ];
           
           let foundChapters = [];
@@ -833,17 +848,53 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
                 const lowerText = $(el).text().toLowerCase();
                 
                 // Filter out obvious non-chapter links that might be in the list
-                if (lowerHref.includes('/download') || lowerHref.includes('/report') || lowerHref.includes('discord.gg') || lowerHref.includes('facebook.com')) {
+                if (lowerHref.includes('/download') || lowerHref.includes('/report') || lowerHref.includes('discord.gg') || lowerHref.includes('facebook.com') || lowerHref.includes('twitter.com')) {
                   return; // Skip
+                }
+                
+                // If the selector is very generic, ensure the text or href looks like a chapter
+                if (selector.includes('href*=')) {
+                  if (!lowerText.includes('chap') && !lowerText.includes('ch.') && !lowerText.match(/\d+/) && !lowerHref.match(/chap(ter|itre)?[-_]?\d+/)) {
+                    return; // Skip if it doesn't look like a chapter
+                  }
                 }
                 
                 foundChapters.push(new URL(href, url).href);
               }
             });
-            if (foundChapters.length > 0) break;
           }
           
+          // If no chapters found, try with Electron to execute JS
+          if (foundChapters.length === 0 && !isChapterPage) {
+            if (onProgress) onProgress("Executing JavaScript to find chapters...");
+            try {
+              const jsHtml = await fetchHtmlWithElectron(url, null, taskState, onProgress);
+              const $js = cheerio.load(jsHtml);
+              for (const selector of chapterSelectors) {
+                $js(selector).each((i, el) => {
+                  const href = $js(el).attr('href');
+                  if (href && !href.includes('javascript:') && href !== '#') {
+                    const lowerHref = href.toLowerCase();
+                    const lowerText = $js(el).text().toLowerCase();
+                    if (lowerHref.includes('/download') || lowerHref.includes('/report') || lowerHref.includes('discord.gg') || lowerHref.includes('facebook.com') || lowerHref.includes('twitter.com')) {
+                      return; // Skip
+                    }
+                    if (selector.includes('href*=')) {
+                      if (!lowerText.includes('chap') && !lowerText.includes('ch.') && !lowerText.match(/\d+/) && !lowerHref.match(/chap(ter|itre)?[-_]?\d+/)) {
+                        return; // Skip if it doesn't look like a chapter
+                      }
+                    }
+                    foundChapters.push(new URL(href, url).href);
+                  }
+                });
+              }
+            } catch (e) {
+              console.log("Failed to extract chapters with Electron:", e);
+            }
+          }
+
           if (foundChapters.length > 0) {
+            foundChapters = [...new Set(foundChapters)];
             // Usually chapters are listed from newest to oldest, so we reverse them to download in order
             foundChapters.reverse();
             links.push(...foundChapters);

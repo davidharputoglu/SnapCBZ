@@ -30,6 +30,7 @@ export const translations = {
     status_bypassing_cf: "Bypassing Cloudflare ({time}s)...",
     status_loading_page: "Loading page ({time}s)...",
     status_logging_in: "Logging in...",
+    status_queued_scraping: "Queued for scraping...",
     cf_wait: "Please wait or solve the captcha if necessary...",    // Layout
     nav_downloads: "Downloads",
     nav_settings: "Settings",
@@ -164,6 +165,7 @@ export const translations = {
     status_bypassing_cf: "Contournement de Cloudflare ({time}s)...",
     status_loading_page: "Chargement de la page ({time}s)...",
     status_logging_in: "Connexion en cours...",
+    status_queued_scraping: "En file d'attente...",
     cf_wait: "Veuillez patienter ou résoudre le captcha si nécessaire...",    // Layout
     nav_downloads: "Téléchargements",
     nav_settings: "Paramètres",
