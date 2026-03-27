@@ -201,7 +201,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
                 headers: {
                   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                   'Accept-Language': 'en-US,en;q=0.5',
-                  'Referer': 'https://google.com/'
+                  'Referer': '${url}'
                 },
                 signal: controller.signal
               })
@@ -245,7 +245,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
       headers: {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.5',
-        'Referer': 'https://google.com/'
+        'Referer': url
       },
       signal: controller.signal
     });
@@ -268,7 +268,13 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
       if (idx > -1) taskState.controllers.splice(idx, 1);
     }
 
-    if (html.includes('Just a moment') || html.includes('Cloudflare') || html.includes('Verify you are human')) {
+    const isCloudflareBlock = res.status === 403 || res.status === 503 || 
+                              html.includes('Just a moment') || 
+                              (html.includes('Cloudflare') && html.includes('Ray ID')) || 
+                              html.includes('Verify you are human') ||
+                              html.includes('Checking your browser');
+
+    if (isCloudflareBlock) {
       return await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
     }
     
@@ -292,7 +298,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           headers: {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'en-US,en;q=0.5',
-            'Referer': 'https://google.com/'
+            'Referer': url
           },
           signal: controller.signal
         });
@@ -390,7 +396,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           }
 
           const isCloudflare = title.includes('Just a moment') || 
-                               title.includes('Cloudflare') || 
+                               (title.includes('Cloudflare') && bodyText.includes('Ray ID')) || 
                                bodyText.includes('Checking your browser') || 
                                bodyText.includes('Verify you are human') ||
                                await executeWithTimeout('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
@@ -432,12 +438,12 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             await executeWithTimeout(`
               (async () => {
                 if (document.body) window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 100));
                 if (document.body) window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 500));
+                await new Promise(r => setTimeout(r, 100));
                 return document.documentElement.outerHTML;
               })();
-            `, 3000).then(html => {
+            `, 10000).then(html => {
               if (!resolved) {
                 resolved = true;
                 clearTimeout(checkTimeout);
@@ -930,6 +936,9 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
     console.error("Error fetching gallery links:", error.message);
     throw error;
   } finally {
+    if (taskState && taskState.scraperWin && !taskState.scraperWin.isDestroyed()) {
+      try { taskState.scraperWin.destroy(); } catch (e) {}
+    }
     if (taskId) activeTasks.delete(taskId);
   }
 }
@@ -958,6 +967,23 @@ export async function startDownload(task, win, settings) {
     
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
+
+    let scraperWin = null;
+    if (hostname.includes('imhentai.xxx') || hostname.includes('3hentai.net')) {
+      scraperWin = new BrowserWindow({
+        show: false,
+        width: 800,
+        height: 600,
+        webPreferences: {
+          partition: 'persist:scraper',
+          nodeIntegration: false,
+          contextIsolation: true,
+          webSecurity: true
+        }
+      });
+      taskState.scraperWin = scraperWin;
+      scraperWin.webContents.userAgent = cleanUserAgent;
+    }
 
     // Auto-login if credentials exist
     if (settings.accounts && settings.accounts.length > 0) {
@@ -1149,7 +1175,7 @@ export async function startDownload(task, win, settings) {
       } else if (hostname.includes('imhentai.xxx')) {
         let html = '';
         try {
-          html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+          html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           const res = await safeGet(url, {}, taskState);
@@ -2009,6 +2035,9 @@ export async function startDownload(task, win, settings) {
     console.error('Download error:', error);
     win.webContents.send('download-progress', { id, status: 'error', error: error.message });
   } finally {
+    if (taskState && taskState.scraperWin && !taskState.scraperWin.isDestroyed()) {
+      try { taskState.scraperWin.destroy(); } catch (e) {}
+    }
     activeTasks.delete(task.id);
   }
 }
