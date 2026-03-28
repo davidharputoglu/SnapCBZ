@@ -435,7 +435,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           // Success!
           try {
             // Scroll down to trigger lazy loading
-            await executeWithTimeout(`
+            const html = await executeWithTimeout(`
               (async () => {
                 if (document.body) window.scrollTo(0, document.body.scrollHeight);
                 await new Promise(r => setTimeout(r, 100));
@@ -443,15 +443,15 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                 await new Promise(r => setTimeout(r, 100));
                 return document.documentElement.outerHTML;
               })();
-            `, 10000).then(html => {
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(checkTimeout);
-                clearTimeout(timeout);
-                if (!existingWin) { try { win.destroy(); } catch (e) {} }
-                resolve(html);
-              }
-            });
+            `, 10000);
+            
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(checkTimeout);
+              clearTimeout(timeout);
+              if (!existingWin) { try { win.destroy(); } catch (e) {} }
+              resolve(html);
+            }
           } catch (innerError) {
             console.log("Error during scrolling or HTML extraction:", innerError.message);
             if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
@@ -649,6 +649,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
           } catch (e) {
             console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
+            if (e.message.includes('Cloudflare bypass')) throw e;
             const res = await safeGet(currentUrl, {}, taskState);
             html = res.data;
           }
@@ -765,6 +766,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
           } catch (e) {
             console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
+            if (e.message.includes('Cloudflare bypass')) throw e;
             const res = await safeGet(currentUrl, {}, taskState);
             html = res.data;
           }
@@ -807,6 +809,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           html = await fastFetchHtml(url, null, taskState, onProgress);
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          if (e.message.includes('Cloudflare bypass')) throw e;
           const res = await safeGet(url, {}, taskState);
           html = res.data;
         }
@@ -1178,6 +1181,7 @@ export async function startDownload(task, win, settings) {
           html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          if (e.message.includes('Cloudflare bypass')) throw e;
           const res = await safeGet(url, {}, taskState);
           html = res.data;
         }
@@ -1326,6 +1330,7 @@ export async function startDownload(task, win, settings) {
             html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
           } catch (e) {
             console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+            if (e.message.includes('Cloudflare bypass')) throw e;
             const res = await safeGet(url, {}, taskState);
             html = res.data;
           }
@@ -1407,6 +1412,7 @@ export async function startDownload(task, win, settings) {
           html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
+          if (e.message.includes('Cloudflare bypass')) throw e;
           const response = await safeGet(url, {}, taskState);
           html = response.data;
         }

@@ -154,6 +154,8 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (str === "Scraping site...") return t("status_scraping_site" as any);
     if (str === "Please wait or solve the captcha if necessary...") return t("cf_wait" as any);
     
+    if (str.startsWith("Timeout waiting for Cloudflare bypass")) return t("error_cf_timeout" as any);
+    
     if (str === "Empty buffer") return t("error_empty_buffer" as any);
     
     if (str === "Unknown") return t("status_unknown" as any);
