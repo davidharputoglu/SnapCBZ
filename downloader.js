@@ -184,8 +184,11 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
   try {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     
+    if (onProgress) onProgress("Fetching HTML (fast)...");
+    
     // Try to fetch using the existing window's context to bypass Cloudflare TLS fingerprinting
     if (existingWin) {
+      if (onProgress) onProgress("Fetching HTML via existing window...");
       try {
         const currentUrlPromise = existingWin.webContents.executeJavaScript('window.location.href');
         const currentUrl = await Promise.race([
@@ -199,8 +202,17 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
               const timeoutId = setTimeout(() => controller.abort(), 15000);
               fetch('${url}', {
                 headers: {
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                  'Accept-Language': 'en-US,en;q=0.5',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Cache-Control': 'max-age=0',
+                  'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                  'Sec-Ch-Ua-Mobile': '?0',
+                  'Sec-Ch-Ua-Platform': '"Windows"',
+                  'Sec-Fetch-Dest': 'document',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'none',
+                  'Sec-Fetch-User': '?1',
+                  'Upgrade-Insecure-Requests': '1',
                   'Referer': '${url}'
                 },
                 signal: controller.signal
@@ -243,8 +255,17 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
     
     const fetchPromise = scraperSession.fetch(url, {
       headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
         'Referer': url
       },
       signal: controller.signal
@@ -296,8 +317,17 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
         
         const fetchPromise = scraperSession.fetch(url, {
           headers: {
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Cache-Control': 'max-age=0',
+            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
             'Referer': url
           },
           signal: controller.signal
@@ -533,6 +563,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 // Helper function to fetch with a strict timeout to prevent hanging, using Electron session for cookies
 async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null) {
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
+  if (onProgress) onProgress("Fetching HTML (safe fallback)...");
+  
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
   const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
@@ -545,8 +577,17 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
     const fetchOptions = {
       headers: {
         'User-Agent': cleanUserAgent,
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'max-age=0',
+        'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
         ...(config.headers || {})
       },
       signal: controller.signal
@@ -1200,6 +1241,10 @@ export async function startDownload(task, win, settings) {
           });
         }
       } else if (hostname.includes('imhentai.xxx')) {
+        if (!url.includes('/gallery/')) {
+          throw new Error("This looks like an artist or tag page. Please use the 'Fetch Gallery Links' button to download multiple galleries.");
+        }
+        
         let html = '';
         try {
           html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
@@ -1581,7 +1626,15 @@ export async function startDownload(task, win, settings) {
             const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
               headers: { 
                 'Referer': url,
-                'User-Agent': cleanUserAgent
+                'User-Agent': cleanUserAgent,
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'cross-site'
               },
               signal: controller.signal
             }).catch(() => {});
@@ -1818,8 +1871,14 @@ export async function startDownload(task, win, settings) {
               headers: { 
                 'Referer': new URL(url).origin + '/',
                 'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'User-Agent': cleanUserAgent
+                'Accept-Language': 'en-US,en;q=0.9',
+                'User-Agent': cleanUserAgent,
+                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                'Sec-Ch-Ua-Mobile': '?0',
+                'Sec-Ch-Ua-Platform': '"Windows"',
+                'Sec-Fetch-Dest': 'image',
+                'Sec-Fetch-Mode': 'no-cors',
+                'Sec-Fetch-Site': 'cross-site'
               },
               signal: controller.signal
             }).catch(() => {});
