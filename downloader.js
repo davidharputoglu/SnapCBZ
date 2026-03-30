@@ -201,20 +201,6 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
               const controller = new AbortController();
               const timeoutId = setTimeout(() => controller.abort(), 15000);
               fetch('${url}', {
-                headers: {
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                  'Accept-Language': 'en-US,en;q=0.9',
-                  'Cache-Control': 'max-age=0',
-                  'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                  'Sec-Ch-Ua-Mobile': '?0',
-                  'Sec-Ch-Ua-Platform': '"Windows"',
-                  'Sec-Fetch-Dest': 'document',
-                  'Sec-Fetch-Mode': 'navigate',
-                  'Sec-Fetch-Site': 'none',
-                  'Sec-Fetch-User': '?1',
-                  'Upgrade-Insecure-Requests': '1',
-                  'Referer': '${url}'
-                },
                 signal: controller.signal
               })
               .then(res => {
@@ -242,6 +228,8 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
         // Ignore errors and fallback to scraperSession.fetch
       }
     }
+
+    if (onProgress) onProgress("Fetching HTML (fast)...");
 
     const defaultUserAgent = session.defaultSession.getUserAgent();
     const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -308,6 +296,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
 async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, onProgress = null) {
   const executeFetch = async () => {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
+    if (onProgress) onProgress("Initializing Cloudflare bypass...");
     // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
     if (!existingWin) {
       try {
@@ -449,7 +438,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           const readyState = await executeWithTimeout('document.readyState');
           const imgCount = await executeWithTimeout('document.querySelectorAll("img").length');
           
-          if (readyState !== 'complete' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+          if (readyState === 'loading' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
             lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
             console.log(lastState);
             if (onProgress) onProgress(`Loading page (${timeElapsed}s)...`);
@@ -490,6 +479,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           // Ignore errors during execution, try again
           lastState = `Error in checkPage: ${e.message}`;
           console.error(lastState);
+          if (onProgress) onProgress(`Waiting for window response (${timeElapsed}s)...`);
           if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
         }
       };
