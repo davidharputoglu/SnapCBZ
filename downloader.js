@@ -368,7 +368,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           if (!existingWin) { try { win.destroy(); } catch (e) {} }
           reject(new Error(`Timeout waiting for Cloudflare bypass. Last state: ${lastState}`));
         }
-      }, 45000); // Increased to 45s to give user time to solve captcha
+      }, 120000); // Increased to 120s to give user time to solve captcha
 
       const executeWithTimeout = (script, ms = 2000) => {
         return Promise.race([
@@ -483,12 +483,14 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             userAgent: cleanUserAgent
           });
         } catch (e) {
-          if (!resolved) {
-            resolved = true;
-            if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
-            clearTimeout(timeout);
-            if (!existingWin) { try { win.destroy(); } catch (err) {} }
-            reject(e);
+          if (e.code !== 'ERR_ABORTED' && (!e.message || !e.message.includes('ERR_ABORTED'))) {
+            if (!resolved) {
+              resolved = true;
+              if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+              clearTimeout(timeout);
+              if (!existingWin) { try { win.destroy(); } catch (err) {} }
+              reject(e);
+            }
           }
         }
       };
@@ -529,7 +531,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 }
 
 // Helper function to fetch with a strict timeout to prevent hanging, using Electron session for cookies
-async function safeGet(url, config = {}, taskState = null) {
+async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null) {
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
@@ -579,9 +581,31 @@ async function safeGet(url, config = {}, taskState = null) {
       new Promise((_, reject) => setTimeout(() => reject(new Error('Data parsing timeout')), 20000))
     ]);
     
+    // Check for Cloudflare block in the response
+    const isCloudflareBlock = res.status === 403 || res.status === 503 || 
+                              (typeof data === 'string' && (
+                                data.includes('Just a moment') || 
+                                (data.includes('Cloudflare') && data.includes('Ray ID')) || 
+                                data.includes('Verify you are human') ||
+                                data.includes('Checking your browser')
+                              ));
+
+    if (isCloudflareBlock) {
+      const html = await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
+      return { data: html, status: 200, headers: res.headers };
+    }
+
     return { data, status: res.status, headers: res.headers };
   } catch (err) {
     clearTimeout(timeoutId);
+    if (err.response && (err.response.status === 403 || err.response.status === 503)) {
+      try {
+        const html = await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
+        return { data: html, status: 200, headers: new Headers() };
+      } catch (cfError) {
+        throw cfError;
+      }
+    }
     throw err;
   }
 }
@@ -650,7 +674,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           } catch (e) {
             console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
             if (e.message.includes('Cloudflare bypass')) throw e;
-            const res = await safeGet(currentUrl, {}, taskState);
+            const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin);
             html = res.data;
           }
           const $ = cheerio.load(html);
@@ -699,7 +723,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           try {
             html = await fastFetchHtml(currentUrl, null, taskState, onProgress);
           } catch (e) {
-            const res = await safeGet(currentUrl);
+            const res = await safeGet(currentUrl, {}, taskState, onProgress, null);
             html = res.data;
           }
           const $ = cheerio.load(html);
@@ -767,7 +791,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           } catch (e) {
             console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
             if (e.message.includes('Cloudflare bypass')) throw e;
-            const res = await safeGet(currentUrl, {}, taskState);
+            const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin);
             html = res.data;
           }
           const $ = cheerio.load(html);
@@ -810,7 +834,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           if (e.message.includes('Cloudflare bypass')) throw e;
-          const res = await safeGet(url, {}, taskState);
+          const res = await safeGet(url, {}, taskState, onProgress, null);
           html = res.data;
         }
         const $ = cheerio.load(html);
@@ -1008,18 +1032,18 @@ export async function startDownload(task, win, settings) {
       checkCancelled();
       if (hostname.includes('rule34.xxx')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await safeGet(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState);
+        const apiRes = await safeGet(`https://api.rule34.xxx/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
         if (apiRes.data && Array.isArray(apiRes.data)) {
           imageUrls = apiRes.data.map(p => p.file_url);
         }
       } else if (hostname.includes('gelbooru.com')) {
         const tags = urlObj.searchParams.get('tags') || '';
-        const apiRes = await safeGet(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState);
+        const apiRes = await safeGet(`https://gelbooru.com/index.php?page=dapi&s=post&q=index&tags=${tags}&json=1&limit=100`, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
         if (apiRes.data && apiRes.data.post) {
           imageUrls = apiRes.data.post.map(p => p.file_url);
         }
       } else if (hostname.includes('rule34.paheal.net')) {
-        const res = await safeGet(url, {}, taskState);
+        const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
         const $ = cheerio.load(res.data);
         $('.shm-thumb').each((i, el) => {
           let src = $(el).find('img').attr('src');
@@ -1033,7 +1057,7 @@ export async function startDownload(task, win, settings) {
         if (match) {
           const galleryId = match[1];
           try {
-            const html = await fastFetchHtml(url, null, taskState);
+            const html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
             const $ = cheerio.load(html);
             
             let galleryData = null;
@@ -1121,7 +1145,7 @@ export async function startDownload(task, win, settings) {
         try {
           html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
-          const res = await safeGet(url, {}, taskState);
+          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
           html = res.data;
         }
         const $ = cheerio.load(html);
@@ -1182,7 +1206,7 @@ export async function startDownload(task, win, settings) {
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           if (e.message.includes('Cloudflare bypass')) throw e;
-          const res = await safeGet(url, {}, taskState);
+          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
           html = res.data;
         }
         const $ = cheerio.load(html);
@@ -1331,7 +1355,7 @@ export async function startDownload(task, win, settings) {
           } catch (e) {
             console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
             if (e.message.includes('Cloudflare bypass')) throw e;
-            const res = await safeGet(url, {}, taskState);
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
             html = res.data;
           }
           const $ = cheerio.load(html);
@@ -1413,7 +1437,7 @@ export async function startDownload(task, win, settings) {
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           if (e.message.includes('Cloudflare bypass')) throw e;
-          const response = await safeGet(url, {}, taskState);
+          const response = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
           html = response.data;
         }
       }
