@@ -201,6 +201,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (loadingPageMatch) return t("status_loading_page" as any, { time: loadingPageMatch[1] });
     
     if (str === "Logging in...") return t("status_logging_in" as any);
+    if (str === "Initializing Cloudflare bypass...") return t("status_cf_init" as any);
     if (str === "Fetching HTML (fast)...") return t("status_fetching_fast" as any);
     if (str === "Fetching HTML via existing window...") return t("status_fetching_existing" as any);
     if (str === "Fetching HTML (safe fallback)...") return t("status_fetching_safe" as any);

@@ -13,6 +13,9 @@ import {
   Image as ImageIcon,
   BookOpen,
   ShieldAlert,
+  Wrench,
+  Cookie,
+  RefreshCw
 } from "lucide-react";
 import { useAppStore, ThemeColor } from "../store";
 import { useTranslation, AppLanguage } from "../translations";
@@ -570,33 +573,39 @@ export const SettingsView: React.FC = () => {
         <section className="bg-card border border-border rounded-3xl p-8 shadow-sm">
           <div className="flex items-center gap-3 mb-6">
             <div className="p-3 bg-primary/10 text-primary rounded-xl">
-              <ShieldAlert className="w-6 h-6" />
+              <Wrench className="w-6 h-6" />
             </div>
             <div>
               <h2 className="text-xl font-semibold text-foreground">
-                {t("set_advanced") || "Avancé & Dépannage"}
+                {t("set_advanced")}
               </h2>
               <p className="text-sm text-muted-foreground">
-                {t("set_advanced_desc") || "Gérer le cache, les cookies et résoudre les problèmes de connexion."}
+                {t("set_advanced_desc")}
               </p>
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-2xl border border-border">
-              <div>
-                <h3 className="font-medium text-foreground">
-                  {t("set_clear_cookies") || "Effacer les cookies et le cache"}
-                </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {t("set_clear_cookies_desc") || "Utile si les téléchargements bloquent sur Cloudflare ou si les connexions échouent."}
-                </p>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-5 bg-muted/30 rounded-2xl border border-border gap-4 transition-colors hover:bg-muted/50">
+              <div className="flex items-start gap-4">
+                <div className="p-2 bg-background rounded-lg border border-border shadow-sm mt-0.5">
+                  <Cookie className="w-5 h-5 text-muted-foreground" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-foreground">
+                    {t("set_clear_cookies")}
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-1 max-w-md">
+                    {t("set_clear_cookies_desc")}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={handleClearCookies}
-                className="px-4 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-xl font-medium transition-colors whitespace-nowrap ml-4"
+                className="px-5 py-2.5 bg-background border border-border hover:bg-muted hover:text-foreground text-muted-foreground rounded-xl font-medium transition-all whitespace-nowrap shadow-sm flex items-center gap-2"
               >
-                {t("set_clear_btn") || "Effacer"}
+                <RefreshCw className="w-4 h-4" />
+                {t("set_clear_btn")}
               </button>
             </div>
           </div>

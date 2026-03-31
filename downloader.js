@@ -293,7 +293,10 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
                               html.includes('Just a moment') || 
                               (html.includes('Cloudflare') && html.includes('Ray ID')) || 
                               html.includes('Verify you are human') ||
-                              html.includes('Checking your browser');
+                              html.includes('Checking your browser') ||
+                              html.includes('cf-browser-verification') ||
+                              html.includes('cf-turnstile') ||
+                              html.includes('challenge-stage');
 
     if (isCloudflareBlock) {
       return await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
@@ -680,7 +683,10 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
                                 data.includes('Just a moment') || 
                                 (data.includes('Cloudflare') && data.includes('Ray ID')) || 
                                 data.includes('Verify you are human') ||
-                                data.includes('Checking your browser')
+                                data.includes('Checking your browser') ||
+                                data.includes('cf-browser-verification') ||
+                                data.includes('cf-turnstile') ||
+                                data.includes('challenge-stage')
                               ));
 
     if (isCloudflareBlock) {
@@ -1415,11 +1421,10 @@ export async function startDownload(task, win, settings) {
           }
         } else {
           // Fallback if g_th or baseUrl fails
-          $('.gthumb img').each((i, el) => {
+          $('.gthumb img, .thumb img, .gallery_thumb img').each((i, el) => {
             let src = $(el).attr('data-src') || $(el).attr('src');
             if (src) {
               // Convert thumbnail URL to full image URL
-              // Example: https://t10.imhentai.xxx/029/85nl14c70e/1t.jpg -> https://m10.imhentai.xxx/029/85nl14c70e/1.jpg
               let realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
               realSrc = realSrc.replace(/\/\/t([0-9]*)\.imhentai\.xxx/, '//m$1.imhentai.xxx');
               imageUrls.push(realSrc);
@@ -1428,7 +1433,7 @@ export async function startDownload(task, win, settings) {
           
           // If still no images, try to find them in the gallery container
           if (imageUrls.length === 0) {
-            $('.gallery_content img').each((i, el) => {
+            $('.gallery_content img, #append_image img, .image-container img').each((i, el) => {
               let src = $(el).attr('data-src') || $(el).attr('src');
               if (src) {
                 const realSrc = src.replace(/([0-9]+)t\.([a-z]+)$/i, '$1.$2');
@@ -1557,6 +1562,9 @@ export async function startDownload(task, win, settings) {
     const uniqueImages = [...new Set(imageUrls)];
     
     if (uniqueImages.length === 0) {
+      if (html && (html.includes('captcha') || html.includes('Cloudflare') || html.includes('DDoS') || html.includes('Just a moment'))) {
+        throw new Error("Cannot download images. The site blocks access or requires a Referer.");
+      }
       throw new Error("No images found on this page.");
     }
 
@@ -2174,7 +2182,7 @@ export async function startDownload(task, win, settings) {
     
   } catch (error) {
     console.error('Download error:', error);
-    win.webContents.send('download-progress', { id, status: 'error', error: error.message });
+    win.webContents.send('download-progress', { id, status: 'error', error: error.message, filename: title || url });
   } finally {
     if (taskState && taskState.scraperWin && !taskState.scraperWin.isDestroyed()) {
       try { taskState.scraperWin.destroy(); } catch (e) {}
