@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pkg from 'electron-updater';
 import contextMenu from 'electron-context-menu';
-import { startDownload, fetchGalleryLinks, cancelTask } from './downloader.js';
+import { startDownload, fetchGalleryLinks, cancelTask, clearScraperCookies } from './downloader.js';
 const { autoUpdater } = pkg;
 
 contextMenu({
@@ -153,6 +153,10 @@ ipcMain.handle('open-login-window', async (event, url) => {
       resolve(true);
     });
   });
+});
+
+ipcMain.handle('clear-cookies', async () => {
+  return await clearScraperCookies();
 });
 
 app.whenReady().then(() => {

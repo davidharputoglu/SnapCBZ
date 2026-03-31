@@ -12,6 +12,7 @@ import {
   MoonStar,
   Image as ImageIcon,
   BookOpen,
+  ShieldAlert,
 } from "lucide-react";
 import { useAppStore, ThemeColor } from "../store";
 import { useTranslation, AppLanguage } from "../translations";
@@ -118,6 +119,24 @@ export const SettingsView: React.FC = () => {
         updateSettings({ lightWallpaper: reader.result as string });
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleClearCookies = async () => {
+    if (confirm(t("alert_clear_cookies") || "Êtes-vous sûr de vouloir effacer les cookies et le cache ? Cela vous déconnectera de tous les sites.")) {
+      try {
+        // @ts-ignore
+        const { ipcRenderer } = window.require('electron');
+        const success = await ipcRenderer.invoke('clear-cookies');
+        if (success) {
+          alert(t("success_clear_cookies") || "Cookies et cache effacés avec succès !");
+        } else {
+          alert(t("error_clear_cookies") || "Erreur lors de l'effacement des cookies.");
+        }
+      } catch (error) {
+        console.error('Failed to clear cookies:', error);
+        alert(t("error_clear_cookies") || "Erreur lors de l'effacement des cookies.");
+      }
     }
   };
 
@@ -544,6 +563,41 @@ export const SettingsView: React.FC = () => {
                   </button>
                 )}
               </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="bg-card border border-border rounded-3xl p-8 shadow-sm">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="p-3 bg-primary/10 text-primary rounded-xl">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <div>
+              <h2 className="text-xl font-semibold text-foreground">
+                {t("set_advanced") || "Avancé & Dépannage"}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {t("set_advanced_desc") || "Gérer le cache, les cookies et résoudre les problèmes de connexion."}
+              </p>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="flex items-center justify-between p-4 bg-muted/50 rounded-2xl border border-border">
+              <div>
+                <h3 className="font-medium text-foreground">
+                  {t("set_clear_cookies") || "Effacer les cookies et le cache"}
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  {t("set_clear_cookies_desc") || "Utile si les téléchargements bloquent sur Cloudflare ou si les connexions échouent."}
+                </p>
+              </div>
+              <button
+                onClick={handleClearCookies}
+                className="px-4 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive rounded-xl font-medium transition-colors whitespace-nowrap ml-4"
+              >
+                {t("set_clear_btn") || "Effacer"}
+              </button>
             </div>
           </div>
         </section>

@@ -14,6 +14,18 @@ let electronScraperQueue = [];
 
 export const activeTasks = new Map();
 
+export async function clearScraperCookies() {
+  try {
+    const scraperSession = session.fromPartition('persist:scraper');
+    await scraperSession.clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] });
+    console.log("Scraper session cookies and cache cleared.");
+    return true;
+  } catch (e) {
+    console.error("Failed to clear scraper session:", e);
+    return false;
+  }
+}
+
 export function cancelTask(taskId) {
   if (activeTasks.has(taskId)) {
     const taskState = activeTasks.get(taskId);
@@ -364,6 +376,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
       let resolved = false;
       let cloudflareTime = 0;
       let timeElapsed = 0;
+      let hasClearedCookies = false;
 
       let lastState = "";
       let checkTimeout;
@@ -404,6 +417,18 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
           
           if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied') || title.includes('403 Forbidden')) {
+            if (!hasClearedCookies && (title.includes('Access denied') || title.includes('403 Forbidden'))) {
+              hasClearedCookies = true;
+              console.log("Access denied/403 detected, clearing cookies and retrying...");
+              if (onProgress) onProgress("Access denied. Clearing cookies and retrying...");
+              try {
+                await session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] });
+                win.reload();
+              } catch(e) {}
+              if (!resolved) checkTimeout = setTimeout(checkPage, 2000);
+              return;
+            }
+
             if (!resolved) {
               resolved = true;
               clearTimeout(checkTimeout);
@@ -420,8 +445,45 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                                bodyText.includes('Verify you are human') ||
                                await executeWithTimeout('document.querySelector("#challenge-stage, .cf-turnstile") !== null');
 
+          // Auto-click age gates and warnings
+          await executeWithTimeout(`
+            (function() {
+              const buttons = document.querySelectorAll('button, a, input[type="submit"], input[type="button"]');
+              for (let btn of buttons) {
+                const text = (btn.innerText || btn.value || '').toLowerCase();
+                if (text === 'i am 18' || text === 'i am 18+' || text === 'i am over 18' || 
+                    text === 'enter' || text === 'accept' || text === 'agree' || 
+                    text === 'yes' || text === 'continue' || text.includes('i am 18') || text.includes('18 and older')) {
+                  
+                  if (text.includes('search') || text.includes('login')) continue;
+                  
+                  const bodyText = document.body.innerText.toLowerCase();
+                  if (bodyText.includes('18+') || bodyText.includes('adult') || bodyText.includes('warning') || bodyText.includes('age')) {
+                    btn.click();
+                    return true;
+                  }
+                }
+              }
+              return false;
+            })();
+          `);
+
           if (isCloudflare) {
             cloudflareTime += 1;
+            
+            // Auto-clear cookies if stuck in Cloudflare loop for 30 seconds
+            if (cloudflareTime === 30 && !hasClearedCookies) {
+               hasClearedCookies = true;
+               console.log("Stuck in Cloudflare loop, clearing cookies...");
+               if (onProgress) onProgress("Clearing cookies to bypass block...");
+               try {
+                 await session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] });
+                 win.reload();
+               } catch(e) {}
+               if (!resolved) checkTimeout = setTimeout(checkPage, 2000);
+               return;
+            }
+            
             lastState = `Cloudflare detected: title="${title}", bodyText.length=${bodyText.length}`;
             console.log(lastState);
             if (onProgress) onProgress(`Bypassing Cloudflare (${cloudflareTime}s)...`);
