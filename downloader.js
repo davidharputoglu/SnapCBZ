@@ -518,16 +518,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           
           // Success!
           try {
-            // Scroll down to trigger lazy loading
-            const html = await executeWithTimeout(`
-              (async () => {
-                if (document.body) window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 100));
-                if (document.body) window.scrollTo(0, document.body.scrollHeight);
-                await new Promise(r => setTimeout(r, 100));
-                return document.documentElement.outerHTML;
-              })();
-            `, 10000);
+            if (onProgress) onProgress(`Extracting HTML...`);
+            const html = await executeWithTimeout('document.documentElement.outerHTML', 15000);
             
             if (!resolved) {
               resolved = true;
@@ -537,8 +529,22 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               resolve(html);
             }
           } catch (innerError) {
-            console.log("Error during scrolling or HTML extraction:", innerError.message);
-            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+            console.log("Error during HTML extraction:", innerError.message);
+            try {
+              if (onProgress) onProgress(`Extracting HTML (fallback)...`);
+              const fallbackHtml = await executeWithTimeout('document.body ? document.body.innerHTML : ""', 10000);
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(checkTimeout);
+                clearTimeout(timeout);
+                if (!existingWin) { try { win.destroy(); } catch (e) {} }
+                resolve(fallbackHtml);
+              }
+            } catch (fallbackError) {
+              console.log("Fallback HTML extraction failed:", fallbackError.message);
+              if (onProgress) onProgress(`Retrying HTML extraction (${timeElapsed}s)...`);
+              if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+            }
           }
         } catch (e) {
           // Ignore errors during execution, try again
