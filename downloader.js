@@ -519,6 +519,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           // Success!
           try {
             if (onProgress) onProgress(`Extracting HTML...`);
+            try { win.webContents.stop(); } catch(e) {} // Stop further loading to unblock renderer
             const html = await executeWithTimeout('document.documentElement.outerHTML', 15000);
             
             if (!resolved) {
@@ -542,6 +543,32 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               }
             } catch (fallbackError) {
               console.log("Fallback HTML extraction failed:", fallbackError.message);
+              
+              // Try to fetch using session cookies instead of executeJavaScript
+              try {
+                console.log("Attempting to fetch HTML using session cookies as last resort...");
+                const scraperSession = session.fromPartition('persist:scraper');
+                const res = await scraperSession.fetch(url, {
+                  headers: {
+                    'User-Agent': cleanUserAgent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                  }
+                });
+                const fetchedHtml = await res.text();
+                if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
+                  if (!resolved) {
+                    resolved = true;
+                    clearTimeout(checkTimeout);
+                    clearTimeout(timeout);
+                    if (!existingWin) { try { win.destroy(); } catch (e) {} }
+                    resolve(fetchedHtml);
+                    return;
+                  }
+                }
+              } catch (fetchErr) {
+                console.log("Session fetch fallback failed:", fetchErr.message);
+              }
+
               if (onProgress) onProgress(`Retrying HTML extraction (${timeElapsed}s)...`);
               if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
             }
