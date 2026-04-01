@@ -769,10 +769,9 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
+            html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
           } catch (e) {
-            console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
-            if (e.message.includes('Cloudflare bypass')) throw e;
+            console.log(`fetchHtmlWithElectron failed for ${currentUrl}, falling back to safeGet:`, e.message);
             const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin);
             html = res.data;
           }
@@ -1305,10 +1304,10 @@ export async function startDownload(task, win, settings) {
         
         let html = '';
         try {
-          html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+          // For imhentai, directly use Electron window to ensure we bypass any advanced protections
+          html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
-          console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
-          if (e.message.includes('Cloudflare bypass')) throw e;
+          console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, e.message);
           const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
           html = res.data;
         }
@@ -1683,19 +1682,24 @@ export async function startDownload(task, win, settings) {
             taskState.controllers.push(controller);
             const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
             
+            const headers = { 
+              'Referer': url,
+              'User-Agent': cleanUserAgent,
+              'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+              'Sec-Ch-Ua-Mobile': '?0',
+              'Sec-Ch-Ua-Platform': '"Windows"',
+              'Sec-Fetch-Dest': 'image',
+              'Sec-Fetch-Mode': 'no-cors',
+              'Sec-Fetch-Site': 'cross-site'
+            };
+            if (cookieString) {
+              headers['Cookie'] = cookieString;
+            }
+            
             const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-              headers: { 
-                'Referer': url,
-                'User-Agent': cleanUserAgent,
-                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'image',
-                'Sec-Fetch-Mode': 'no-cors',
-                'Sec-Fetch-Site': 'cross-site'
-              },
+              headers,
               signal: controller.signal
             }).catch(() => {});
             
@@ -1927,19 +1931,24 @@ export async function startDownload(task, win, settings) {
             taskState.controllers.push(controller);
             const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 seconds strict timeout
             
+            const headers = { 
+              'Referer': new URL(url).origin + '/',
+              'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'User-Agent': cleanUserAgent,
+              'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+              'Sec-Ch-Ua-Mobile': '?0',
+              'Sec-Ch-Ua-Platform': '"Windows"',
+              'Sec-Fetch-Dest': 'image',
+              'Sec-Fetch-Mode': 'no-cors',
+              'Sec-Fetch-Site': 'cross-site'
+            };
+            if (cookieString) {
+              headers['Cookie'] = cookieString;
+            }
+            
             const fetchPromise = session.fromPartition('persist:scraper').fetch(imgUrl, { 
-              headers: { 
-                'Referer': new URL(url).origin + '/',
-                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'User-Agent': cleanUserAgent,
-                'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'image',
-                'Sec-Fetch-Mode': 'no-cors',
-                'Sec-Fetch-Site': 'cross-site'
-              },
+              headers,
               signal: controller.signal
             }).catch(() => {});
             
