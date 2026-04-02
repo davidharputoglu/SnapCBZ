@@ -520,7 +520,45 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           try {
             if (onProgress) onProgress(`Extracting HTML...`);
             try { win.webContents.stop(); } catch(e) {} // Stop further loading to unblock renderer
-            const html = await executeWithTimeout('document.documentElement.outerHTML', 15000);
+            
+            let html = '';
+            let fetchSuccess = false;
+            
+            // 1. Try session fetch first (most reliable, immune to renderer freezes)
+            try {
+              const scraperSession = session.fromPartition('persist:scraper');
+              const fetchController = new AbortController();
+              const fetchTimeoutId = setTimeout(() => fetchController.abort(), 10000);
+              
+              const res = await scraperSession.fetch(url, {
+                headers: {
+                  'User-Agent': cleanUserAgent,
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                },
+                signal: fetchController.signal
+              });
+              
+              const fetchTextPromise = res.text();
+              const fetchedHtml = await Promise.race([
+                fetchTextPromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 5000))
+              ]);
+              
+              clearTimeout(fetchTimeoutId);
+              
+              if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
+                html = fetchedHtml;
+                fetchSuccess = true;
+              }
+            } catch (fetchErr) {
+              console.log("Primary session fetch failed:", fetchErr.message);
+            }
+            
+            // 2. Fallback to executeJavaScript if fetch failed
+            if (!fetchSuccess) {
+              if (onProgress) onProgress(`Extracting HTML (fallback)...`);
+              html = await executeWithTimeout('document.documentElement.outerHTML', 10000);
+            }
             
             if (!resolved) {
               resolved = true;
@@ -531,47 +569,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             }
           } catch (innerError) {
             console.log("Error during HTML extraction:", innerError.message);
-            try {
-              if (onProgress) onProgress(`Extracting HTML (fallback)...`);
-              const fallbackHtml = await executeWithTimeout('document.body ? document.body.innerHTML : ""', 10000);
-              if (!resolved) {
-                resolved = true;
-                clearTimeout(checkTimeout);
-                clearTimeout(timeout);
-                if (!existingWin) { try { win.destroy(); } catch (e) {} }
-                resolve(fallbackHtml);
-              }
-            } catch (fallbackError) {
-              console.log("Fallback HTML extraction failed:", fallbackError.message);
-              
-              // Try to fetch using session cookies instead of executeJavaScript
-              try {
-                console.log("Attempting to fetch HTML using session cookies as last resort...");
-                const scraperSession = session.fromPartition('persist:scraper');
-                const res = await scraperSession.fetch(url, {
-                  headers: {
-                    'User-Agent': cleanUserAgent,
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-                  }
-                });
-                const fetchedHtml = await res.text();
-                if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
-                  if (!resolved) {
-                    resolved = true;
-                    clearTimeout(checkTimeout);
-                    clearTimeout(timeout);
-                    if (!existingWin) { try { win.destroy(); } catch (e) {} }
-                    resolve(fetchedHtml);
-                    return;
-                  }
-                }
-              } catch (fetchErr) {
-                console.log("Session fetch fallback failed:", fetchErr.message);
-              }
-
-              if (onProgress) onProgress(`Retrying HTML extraction (${timeElapsed}s)...`);
-              if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
-            }
+            if (onProgress) onProgress(`Retrying HTML extraction (${timeElapsed}s)...`);
+            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
           }
         } catch (e) {
           // Ignore errors during execution, try again
