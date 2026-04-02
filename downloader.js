@@ -378,7 +378,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 
       let resolved = false;
       let cloudflareTime = 0;
-      let timeElapsed = 0;
+      const startTime = Date.now();
       let hasClearedCookies = false;
 
       let lastState = "";
@@ -414,7 +414,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 
       const checkPage = async () => {
         if (resolved) return;
-        timeElapsed += 1;
+        const timeElapsed = Math.floor((Date.now() - startTime) / 1000);
         try {
           const title = await executeWithTimeout('document.title || ""');
           const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
@@ -530,13 +530,29 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               const fetchController = new AbortController();
               const fetchTimeoutId = setTimeout(() => fetchController.abort(), 10000);
               
-              const res = await scraperSession.fetch(url, {
+              const fetchPromise = scraperSession.fetch(url, {
                 headers: {
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                  'Accept-Language': 'en-US,en;q=0.9',
+                  'Cache-Control': 'max-age=0',
+                  'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                  'Sec-Ch-Ua-Mobile': '?0',
+                  'Sec-Ch-Ua-Platform': '"Windows"',
+                  'Sec-Fetch-Dest': 'document',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'none',
+                  'Sec-Fetch-User': '?1',
+                  'Upgrade-Insecure-Requests': '1',
                   'User-Agent': cleanUserAgent,
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                  'Referer': url
                 },
                 signal: fetchController.signal
               });
+              
+              const res = await Promise.race([
+                fetchPromise,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch request timeout')), 10000))
+              ]);
               
               const fetchTextPromise = res.text();
               const fetchedHtml = await Promise.race([
@@ -549,6 +565,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
                 html = fetchedHtml;
                 fetchSuccess = true;
+              } else {
+                console.log("Session fetch returned Cloudflare challenge or empty HTML.");
               }
             } catch (fetchErr) {
               console.log("Primary session fetch failed:", fetchErr.message);
@@ -557,7 +575,14 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             // 2. Fallback to executeJavaScript if fetch failed
             if (!fetchSuccess) {
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
-              html = await executeWithTimeout('document.documentElement.outerHTML', 10000);
+              try {
+                html = await executeWithTimeout('document.documentElement.outerHTML', 10000);
+              } catch (execErr) {
+                console.log("executeJavaScript fallback failed:", execErr.message);
+                // If both failed, we might be completely frozen.
+                // Let's try to just return whatever we can, or throw to trigger a reload?
+                throw new Error("Both fetch and executeJavaScript failed to extract HTML.");
+              }
             }
             
             if (!resolved) {
@@ -569,13 +594,47 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             }
           } catch (innerError) {
             console.log("Error during HTML extraction:", innerError.message);
+            
+            // If we've been trying for more than 60 seconds total, give up and reload
+            if (timeElapsed > 60 && !hasClearedCookies) {
+              hasClearedCookies = true;
+              console.log("Extraction stuck, clearing cookies and reloading...");
+              if (onProgress) onProgress("Extraction stuck. Reloading...");
+              try {
+                await session.fromPartition('persist:scraper').clearStorageData({ storages: ['serviceworkers', 'caches'] });
+                win.reload();
+              } catch(e) {}
+            } else if (timeElapsed > 110) {
+              // Close to the 120s hard timeout, just resolve with what we have or reject
+              if (!resolved) {
+                resolved = true;
+                clearTimeout(checkTimeout);
+                clearTimeout(timeout);
+                if (!existingWin) { try { win.destroy(); } catch (e) {} }
+                reject(new Error("Failed to extract HTML after multiple attempts. Page might be frozen."));
+                return;
+              }
+            }
+            
             if (onProgress) onProgress(`Retrying HTML extraction (${timeElapsed}s)...`);
-            if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
+            if (!resolved) checkTimeout = setTimeout(checkPage, 2000);
           }
         } catch (e) {
           // Ignore errors during execution, try again
           lastState = `Error in checkPage: ${e.message}`;
           console.error(lastState);
+          
+          if (timeElapsed > 110) {
+            if (!resolved) {
+              resolved = true;
+              clearTimeout(checkTimeout);
+              clearTimeout(timeout);
+              if (!existingWin) { try { win.destroy(); } catch (err) {} }
+              reject(new Error(`Renderer frozen or timeout waiting for Cloudflare bypass. Last error: ${e.message}`));
+              return;
+            }
+          }
+          
           if (onProgress) onProgress(`Waiting for window response (${timeElapsed}s)...`);
           if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
         }
