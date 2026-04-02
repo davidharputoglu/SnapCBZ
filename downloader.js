@@ -1397,12 +1397,17 @@ export async function startDownload(task, win, settings) {
         try {
           // For imhentai, directly use Electron window to ensure we bypass any advanced protections
           html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+          console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
         } catch (e) {
           console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, e.message);
           const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
           html = res.data;
+          console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
         }
+        
+        console.log(`[TRACE] Loading HTML into cheerio...`);
         const $ = cheerio.load(html);
+        console.log(`[TRACE] Cheerio loaded.`);
         title = $('h1').text().trim();
         
         // Extract artist
@@ -1489,7 +1494,11 @@ export async function startDownload(task, win, settings) {
           }
         }
 
-        const totalPages = Object.keys(gTh).length || loadPages;
+        let totalPages = Object.keys(gTh).length || loadPages;
+        if (totalPages > 10000) {
+          console.warn(`Unreasonably large totalPages (${totalPages}), capping at 10000`);
+          totalPages = 10000;
+        }
         if (totalPages > 0 && baseUrl) {
           for (let i = 1; i <= totalPages; i++) {
             let extCode = 'j';
@@ -1650,6 +1659,7 @@ export async function startDownload(task, win, settings) {
     }
 
     const uniqueImages = [...new Set(imageUrls)];
+    console.log(`[TRACE] Found ${uniqueImages.length} unique images.`);
     
     if (uniqueImages.length === 0) {
       if (html && (html.includes('captcha') || html.includes('Cloudflare') || html.includes('DDoS') || html.includes('Just a moment'))) {
@@ -1661,8 +1671,14 @@ export async function startDownload(task, win, settings) {
     // Get cookies from the scraper session to bypass Cloudflare for image downloads
     let cookieString = '';
     try {
-      const cookies = await session.fromPartition('persist:scraper').cookies.get({ url: urlObj.origin });
+      console.log(`[TRACE] Fetching cookies...`);
+      const cookiesPromise = session.fromPartition('persist:scraper').cookies.get({ url: urlObj.origin });
+      const cookies = await Promise.race([
+        cookiesPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Cookies get timeout')), 5000))
+      ]);
       cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+      console.log(`[TRACE] Cookies fetched.`);
     } catch (e) {
       console.error("Failed to get cookies:", e);
     }
@@ -1671,11 +1687,17 @@ export async function startDownload(task, win, settings) {
     let saveDir = '';
     let finalFilename = '';
     
+    console.log(`[TRACE] Preparing to download images (type: ${type})...`);
+    
     if (type === 'images') {
       const baseDir = settings.imageBoardDirectory || path.join(app.getPath('downloads'), 'SnapCBZ', 'ImageBoards');
       saveDir = path.join(baseDir, copyright || 'Unknown', character || 'Unknown');
-      await fs.ensureDir(saveDir);
+      await Promise.race([
+        fs.ensureDir(saveDir),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Directory creation timeout')), 5000))
+      ]);
       
+      console.log(`[TRACE] Sending downloading_images status to UI...`);
       win.webContents.send('download-progress', { 
         id, 
         status: 'downloading_images', 
@@ -1930,14 +1952,21 @@ export async function startDownload(task, win, settings) {
       }
       
       saveDir = path.join(baseDir, cleanCategory);
-      await fs.ensureDir(saveDir);
+      await Promise.race([
+        fs.ensureDir(saveDir),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Directory creation timeout')), 5000))
+      ]);
       
       finalFilename = `${title}.cbz`;
       const finalPath = path.join(saveDir, finalFilename);
       
       const tempDir = path.join(app.getPath('temp'), 'snapcbz', id);
-      await fs.ensureDir(tempDir);
+      await Promise.race([
+        fs.ensureDir(tempDir),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Temp directory creation timeout')), 5000))
+      ]);
       
+      console.log(`[TRACE] Sending downloading_images status to UI (CBZ mode)...`);
       win.webContents.send('download-progress', { 
         id, 
         status: 'downloading_images', 
