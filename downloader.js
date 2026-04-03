@@ -555,10 +555,15 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               ]);
               
               const fetchTextPromise = res.text();
-              const fetchedHtml = await Promise.race([
+              let fetchedHtml = await Promise.race([
                 fetchTextPromise,
                 new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 5000))
               ]);
+              
+              if (fetchedHtml && fetchedHtml.length > 5000000) {
+                console.warn(`[WARNING] HTML is extremely large (${fetchedHtml.length} bytes), truncating to prevent freeze.`);
+                fetchedHtml = fetchedHtml.substring(0, 5000000);
+              }
               
               clearTimeout(fetchTimeoutId);
               
@@ -577,6 +582,10 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
               try {
                 html = await executeWithTimeout('document.documentElement.outerHTML', 10000);
+                if (html && html.length > 5000000) {
+                  console.warn(`[WARNING] Fallback HTML is extremely large (${html.length} bytes), truncating.`);
+                  html = html.substring(0, 5000000);
+                }
               } catch (execErr) {
                 console.log("executeJavaScript fallback failed:", execErr.message);
                 // If both failed, we might be completely frozen.
@@ -1180,6 +1189,7 @@ export async function startDownload(task, win, settings) {
     let extractedArtist = category; // Start with what we got from the URL
     let extractedLanguage = language; // Start with what we got from the URL
     let isManhwa = false;
+    let html = ''; // Declare html at the top level
     
     const urlObj = new URL(url);
     const hostname = urlObj.hostname;
@@ -1330,7 +1340,6 @@ export async function startDownload(task, win, settings) {
           }
         }
       } else if (hostname.includes('3hentai.net')) {
-        let html = '';
         try {
           html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
@@ -1393,7 +1402,6 @@ export async function startDownload(task, win, settings) {
           throw new Error("This looks like an artist or tag page. Please use the 'Fetch Gallery Links' button to download multiple galleries.");
         }
         
-        let html = '';
         try {
           // For imhentai, directly use Electron window to ensure we bypass any advanced protections
           html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
@@ -1629,7 +1637,6 @@ export async function startDownload(task, win, settings) {
 
     // Generic fallback
     if (imageUrls.length === 0) {
-      let html = '';
       if (hostname.includes('nhentai.net')) {
         html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
       } else if (!hostname.includes('imhentai.xxx')) {
