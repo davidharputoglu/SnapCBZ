@@ -524,57 +524,74 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             let html = '';
             let fetchSuccess = false;
             
-            // 1. Try session fetch first (most reliable, immune to renderer freezes)
+            // 0. Try to extract HTML immediately while renderer is responsive
             try {
-              const scraperSession = session.fromPartition('persist:scraper');
-              const fetchController = new AbortController();
-              const fetchTimeoutId = setTimeout(() => fetchController.abort(), 10000);
-              
-              const fetchPromise = scraperSession.fetch(url, {
-                headers: {
-                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                  'Accept-Language': 'en-US,en;q=0.9',
-                  'Cache-Control': 'max-age=0',
-                  'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-                  'Sec-Ch-Ua-Mobile': '?0',
-                  'Sec-Ch-Ua-Platform': '"Windows"',
-                  'Sec-Fetch-Dest': 'document',
-                  'Sec-Fetch-Mode': 'navigate',
-                  'Sec-Fetch-Site': 'none',
-                  'Sec-Fetch-User': '?1',
-                  'Upgrade-Insecure-Requests': '1',
-                  'User-Agent': cleanUserAgent,
-                  'Referer': url
-                },
-                signal: fetchController.signal
-              });
-              
-              const res = await Promise.race([
-                fetchPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch request timeout')), 10000))
-              ]);
-              
-              const fetchTextPromise = res.text();
-              let fetchedHtml = await Promise.race([
-                fetchTextPromise,
-                new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 5000))
-              ]);
-              
-              if (fetchedHtml && fetchedHtml.length > 5000000) {
-                console.warn(`[WARNING] HTML is extremely large (${fetchedHtml.length} bytes), truncating to prevent freeze.`);
-                fetchedHtml = fetchedHtml.substring(0, 5000000);
+              html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
+              if (html && html.length > 5000000) {
+                html = html.substring(0, 5000000);
               }
-              
-              clearTimeout(fetchTimeoutId);
-              
-              if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
-                html = fetchedHtml;
+              if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
                 fetchSuccess = true;
-              } else {
-                console.log("Session fetch returned Cloudflare challenge or empty HTML.");
+                console.log(`[TRACE] Extracted HTML immediately via executeJavaScript, length: ${html.length}`);
               }
-            } catch (fetchErr) {
-              console.log("Primary session fetch failed:", fetchErr.message);
+            } catch (e) {
+              console.log("Failed to extract HTML immediately:", e.message);
+            }
+            
+            // 1. Try session fetch if immediate extraction failed
+            if (!fetchSuccess) {
+              try {
+                const scraperSession = session.fromPartition('persist:scraper');
+                const fetchController = new AbortController();
+                const fetchTimeoutId = setTimeout(() => fetchController.abort(), 10000);
+                
+                const fetchPromise = scraperSession.fetch(url, {
+                  headers: {
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Cache-Control': 'max-age=0',
+                    'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+                    'Sec-Ch-Ua-Mobile': '?0',
+                    'Sec-Ch-Ua-Platform': '"Windows"',
+                    'Sec-Fetch-Dest': 'document',
+                    'Sec-Fetch-Mode': 'navigate',
+                    'Sec-Fetch-Site': 'none',
+                    'Sec-Fetch-User': '?1',
+                    'Upgrade-Insecure-Requests': '1',
+                    'User-Agent': cleanUserAgent,
+                    'Referer': url
+                  },
+                  signal: fetchController.signal
+                });
+                
+                const res = await Promise.race([
+                  fetchPromise,
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch request timeout')), 10000))
+                ]);
+                
+                const fetchTextPromise = res.text();
+                let fetchedHtml = await Promise.race([
+                  fetchTextPromise,
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 5000))
+                ]);
+                
+                if (fetchedHtml && fetchedHtml.length > 5000000) {
+                  console.warn(`[WARNING] HTML is extremely large (${fetchedHtml.length} bytes), truncating to prevent freeze.`);
+                  fetchedHtml = fetchedHtml.substring(0, 5000000);
+                }
+                
+                clearTimeout(fetchTimeoutId);
+                
+                if (fetchedHtml && !fetchedHtml.includes('Just a moment') && !fetchedHtml.includes('Cloudflare') && !fetchedHtml.includes('Verify you are human')) {
+                  html = fetchedHtml;
+                  fetchSuccess = true;
+                  console.log(`[TRACE] Extracted HTML via session fetch, length: ${html.length}`);
+                } else {
+                  console.log("Session fetch returned Cloudflare challenge or empty HTML.");
+                }
+              } catch (fetchErr) {
+                console.log("Primary session fetch failed:", fetchErr.message);
+              }
             }
             
             // 2. Fallback to executeJavaScript if fetch failed
