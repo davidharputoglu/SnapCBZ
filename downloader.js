@@ -581,17 +581,33 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!fetchSuccess) {
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
               try {
-                html = await executeWithTimeout('document.documentElement.outerHTML', 10000);
+                // Use a very short timeout for the fallback to avoid hanging
+                html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
                 if (html && html.length > 5000000) {
                   console.warn(`[WARNING] Fallback HTML is extremely large (${html.length} bytes), truncating.`);
                   html = html.substring(0, 5000000);
                 }
+                fetchSuccess = true;
               } catch (execErr) {
                 console.log("executeJavaScript fallback failed:", execErr.message);
-                // If both failed, we might be completely frozen.
-                // Let's try to just return whatever we can, or throw to trigger a reload?
-                throw new Error("Both fetch and executeJavaScript failed to extract HTML.");
               }
+            }
+
+            // 3. Final fallback: try to get just the body if everything else fails
+            if (!fetchSuccess) {
+               if (onProgress) onProgress(`Extracting HTML (safe fallback)...`);
+               try {
+                 html = await executeWithTimeout('document.body.innerHTML', 3000);
+                 if (html && html.length > 5000000) {
+                    html = html.substring(0, 5000000);
+                 }
+                 // Wrap it in basic HTML structure so cheerio doesn't complain
+                 html = `<html><body>${html}</body></html>`;
+                 fetchSuccess = true;
+               } catch (safeErr) {
+                 console.log("Safe fallback failed:", safeErr.message);
+                 throw new Error("All HTML extraction methods failed.");
+               }
             }
             
             if (!resolved) {
@@ -805,7 +821,15 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
         throw cfError;
       }
     }
-    throw err;
+    
+    // Fallback to fastFetchHtml if safeGet fails
+    console.log(`safeGet failed for ${url}, falling back to fastFetchHtml:`, err.message);
+    try {
+      const html = await fastFetchHtml(url, existingWin, taskState, onProgress);
+      return { data: html, status: 200, headers: new Headers() };
+    } catch (fastFetchErr) {
+      throw new Error(`safeGet and fastFetchHtml failed: ${err.message} | ${fastFetchErr.message}`);
+    }
   }
 }
 
@@ -1406,11 +1430,59 @@ export async function startDownload(task, win, settings) {
           // For imhentai, directly use Electron window to ensure we bypass any advanced protections
           html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
           console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
+          
+          if (!html || html.length < 100) {
+            throw new Error("HTML is empty or too short");
+          }
         } catch (e) {
           console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, e.message);
-          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
-          html = res.data;
-          console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
+          try {
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
+            html = res.data;
+            console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
+          } catch (safeGetErr) {
+            console.log(`safeGet failed for ${url}, falling back to fastFetchHtml:`, safeGetErr.message);
+            try {
+              html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+              console.log(`[TRACE] fastFetchHtml resolved for ${url}, html length: ${html ? html.length : 0}`);
+            } catch (fastFetchErr) {
+              console.log(`fastFetchHtml failed for ${url}, falling back to basic axios:`, fastFetchErr.message);
+              win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Extracting HTML (safe fallback)..." });
+              try {
+                const axios = require('axios');
+                const res = await axios.get(url, {
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                  },
+                  timeout: 10000
+                });
+                html = res.data;
+                console.log(`[TRACE] axios resolved for ${url}, html length: ${html ? html.length : 0}`);
+              } catch (axiosErr) {
+                console.log(`axios failed for ${url}, falling back to executeJavaScript:`, axiosErr.message);
+                if (scraperWin && !scraperWin.isDestroyed()) {
+                  try {
+                    const execPromise = scraperWin.webContents.executeJavaScript('document.documentElement.outerHTML', true);
+                    html = await Promise.race([
+                      execPromise,
+                      new Promise((_, reject) => setTimeout(() => reject(new Error('executeJavaScript timeout')), 5000))
+                    ]);
+                    if (html && html.length > 5000000) {
+                      html = html.substring(0, 5000000);
+                    }
+                    console.log(`[TRACE] executeJavaScript resolved for ${url}, html length: ${html ? html.length : 0}`);
+                  } catch (execErr) {
+                    console.log(`executeJavaScript failed for ${url}:`, execErr.message);
+                    throw new Error("All HTML extraction methods failed for imhentai.");
+                  }
+                } else {
+                  throw new Error("All HTML extraction methods failed for imhentai and scraperWin is destroyed.");
+                }
+              }
+            }
+          }
         }
         
         console.log(`[TRACE] Loading HTML into cheerio...`);

@@ -208,6 +208,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     
     if (str === "Extracting HTML...") return t("status_extracting_html" as any);
     if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
+    if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
     if (str === "Logging in...") return t("status_logging_in" as any);
     if (str === "Initializing Cloudflare bypass...") return t("status_cf_init" as any);
     if (str === "Fetching HTML (fast)...") return t("status_fetching_fast" as any);
