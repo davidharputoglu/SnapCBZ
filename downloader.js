@@ -438,6 +438,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
     return new Promise((resolve, reject) => {
       if (taskState && taskState.isCancelled) return reject(new Error("Cancelled by user"));
       
+      const urlObj = new URL(url);
       const win = existingWin || new BrowserWindow({
         show: false,
         width: 800,
@@ -449,14 +450,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
         }
       });
       
-      // Attach debugger early to prevent hangs later
-      try {
-        if (!win.webContents.debugger.isAttached()) {
-          win.webContents.debugger.attach('1.3');
-        }
-      } catch (e) {
-        console.log("Failed to attach debugger early:", e.message);
-      }
       const defaultUserAgent = session.defaultSession.getUserAgent();
       const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
       
@@ -478,7 +471,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             resolved = true;
             if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
             clearTimeout(timeout);
-            try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
             if (!existingWin) { try { win.destroy(); } catch (e) {} }
             reject(new Error("Cancelled by user"));
           }
@@ -489,7 +481,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
         if (!resolved) {
           resolved = true;
           if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
-          try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
           if (!existingWin) { try { win.destroy(); } catch (e) {} }
           reject(new Error(`Timeout waiting for Cloudflare bypass. Last state: ${lastState}`));
         }
@@ -526,7 +517,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               resolved = true;
               clearTimeout(checkTimeout);
               clearTimeout(timeout);
-              try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
               if (!existingWin) { try { win.destroy(); } catch (e) {} }
               reject(new Error(`Site error: ${title}`));
             }
@@ -613,34 +603,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             
             let html = '';
             let fetchSuccess = false;
-            
-            // 0. Try to extract HTML via CDP (bypasses JS engine, immune to freezes)
-            try {
-              if (onProgress) onProgress(`Extracting HTML (CDP)...`);
-              
-              const cdpWithTimeout = (command, params, ms = 5000) => {
-                return Promise.race([
-                  win.webContents.debugger.sendCommand(command, params),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error(`CDP ${command} timeout`)), ms))
-                ]);
-              };
-
-              if (win.webContents.debugger.isAttached()) {
-                const doc = await cdpWithTimeout('DOM.getDocument', { depth: 0 });
-                const res = await cdpWithTimeout('DOM.getOuterHTML', { nodeId: doc.root.nodeId });
-                html = res.outerHTML;
-                
-                if (html && html.length > 5000000) {
-                  html = html.substring(0, 5000000);
-                }
-                if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
-                  fetchSuccess = true;
-                  console.log(`[TRACE] Extracted HTML immediately via CDP, length: ${html.length}`);
-                }
-              }
-            } catch (e) {
-              console.log("Failed to extract HTML via CDP:", e.message);
-            }
             
             // 0.5. Try to extract HTML immediately while renderer is responsive
             if (!fetchSuccess) {
@@ -758,7 +720,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               resolved = true;
               clearTimeout(checkTimeout);
               clearTimeout(timeout);
-              try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
               if (!existingWin) { try { win.destroy(); } catch (e) {} }
               resolve(html);
             }
@@ -780,7 +741,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                 resolved = true;
                 clearTimeout(checkTimeout);
                 clearTimeout(timeout);
-                try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
                 if (!existingWin) { try { win.destroy(); } catch (e) {} }
                 reject(new Error("Failed to extract HTML after multiple attempts. Page might be frozen."));
                 return;
@@ -792,7 +752,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           }
         } catch (e) {
           // Ignore errors during execution, try again
-          lastState = `Error in checkPage: ${e.message}`;
+          lastState = \`Error in checkPage: \${e.message}\`;
           console.error(lastState);
           
           if (timeElapsed > 110) {
@@ -800,14 +760,13 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               resolved = true;
               clearTimeout(checkTimeout);
               clearTimeout(timeout);
-              try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
               if (!existingWin) { try { win.destroy(); } catch (err) {} }
-              reject(new Error(`Renderer frozen or timeout waiting for Cloudflare bypass. Last error: ${e.message}`));
+              reject(new Error(\`Renderer frozen or timeout waiting for Cloudflare bypass. Last error: \${e.message}\`));
               return;
             }
           }
           
-          if (onProgress) onProgress(`Waiting for window response (${timeElapsed}s)...`);
+          if (onProgress) onProgress(\`Waiting for window response (\${timeElapsed}s)...\`);
           if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
         }
       };
@@ -836,7 +795,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               resolved = true;
               if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
               clearTimeout(timeout);
-              try { if (win.webContents.debugger.isAttached()) win.webContents.debugger.detach(); } catch(e) {}
               if (!existingWin) { try { win.destroy(); } catch (err) {} }
               reject(e);
             }
