@@ -153,6 +153,15 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (str === "Cannot download images. The site blocks access or requires a Referer.") return t("error_dl_blocked" as any);
     if (str === "Scraping site...") return t("status_scraping_site" as any);
     if (str === "Please wait or solve the captcha if necessary...") return t("cf_wait" as any);
+    if (str === "Extracting HTML...") return t("status_extracting_html" as any);
+    if (str === "Extracting HTML (CDP)...") return t("status_extracting_html_cdp" as any) || "Extracting HTML (CDP)...";
+    if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
+    if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
+    
+    if (str.startsWith("Retrying HTML extraction")) {
+      const time = str.match(/\d+/)?.[0] || "0";
+      return t("status_retrying_html" as any, { time });
+    }
     
     if (str.startsWith("Timeout waiting for Cloudflare bypass")) return t("error_cf_timeout" as any);
     

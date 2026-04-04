@@ -193,6 +193,7 @@ async function autoLogin(siteUrl, username, password) {
 }
 
 export async function fastFetchHtml(url, existingWin = null, taskState = null, onProgress = null) {
+  setupAdblock();
   try {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     
@@ -308,7 +309,70 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
   }
 }
 
+let isAdblockSetup = false;
+function setupAdblock() {
+  if (isAdblockSetup) return;
+  isAdblockSetup = true;
+  try {
+    const scraperSession = session.fromPartition('persist:scraper');
+    scraperSession.webRequest.onBeforeRequest({
+      urls: ['*://*/*']
+    }, (details, callback) => {
+      const url = details.url.toLowerCase();
+      const blockedDomains = [
+        'google-analytics.com', 'doubleclick.net', 'googlesyndication.com',
+        'exoclick.com', 'juicyads.com', 'ero-advertising.com',
+        'trafficjunky.com', 'traffichunt.com', 'popads.net',
+        'popcash.net', 'adxad.com', 'realsrv.com', 'bidgear.com',
+        'tsyndicate.com', 'exosrv.com', 'adxpansion.com',
+        'mads.com', 'adsterra.com', 'hilltopads.com',
+        'propellerads.com', 'onclickads.net', 'adcash.com',
+        'chaturbate.com', 'bongacams.com', 'livejasmin.com',
+        'stripchat.com', 'jerkmate.com', 'camsoda.com',
+        'ad.directrev.com', 'ads.exoclick.com', 'syndication.exoclick.com',
+        's.magsrv.com', 'a.magsrv.com', 's.exosrv.com', 'a.exosrv.com',
+        's.orbsrv.com', 'a.orbsrv.com', 's.zdbb.net', 'a.zdbb.net',
+        's.realsrv.com', 'a.realsrv.com', 's.adxad.com', 'a.adxad.com',
+        's.tsyndicate.com', 'a.tsyndicate.com', 's.adxpansion.com', 'a.adxpansion.com',
+        's.mads.com', 'a.mads.com', 's.adsterra.com', 'a.adsterra.com',
+        's.hilltopads.com', 'a.hilltopads.com', 's.propellerads.com', 'a.propellerads.com',
+        's.onclickads.net', 'a.onclickads.net', 's.adcash.com', 'a.adcash.com',
+        's.chaturbate.com', 'a.chaturbate.com', 's.bongacams.com', 'a.bongacams.com',
+        's.livejasmin.com', 'a.livejasmin.com', 's.stripchat.com', 'a.stripchat.com',
+        's.jerkmate.com', 'a.jerkmate.com', 's.camsoda.com', 'a.camsoda.com',
+        's.ad.directrev.com', 'a.ad.directrev.com', 's.ads.exoclick.com', 'a.ads.exoclick.com',
+        's.syndication.exoclick.com', 'a.syndication.exoclick.com'
+      ];
+      
+      // Also block common ad script names
+      if (url.includes('/ads/') || url.includes('/ad/') || url.includes('popunder') || url.includes('popup') || url.includes('banner')) {
+        // Be careful not to block legit resources
+        if (url.endsWith('.js') || url.includes('?zoneid=')) {
+          return callback({ cancel: true });
+        }
+      }
+
+      for (const domain of blockedDomains) {
+        if (url.includes(domain)) {
+          return callback({ cancel: true });
+        }
+      }
+      
+      // Block video/audio to save bandwidth and prevent autoplay
+      if (details.resourceType === 'media') {
+        return callback({ cancel: true });
+      }
+
+      callback({ cancel: false });
+    });
+    console.log("Adblock rules applied to scraper session.");
+  } catch (e) {
+    console.error("Failed to setup adblock:", e);
+  }
+}
+
 async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, onProgress = null) {
+  setupAdblock();
   const executeFetch = async () => {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     if (onProgress) onProgress("Initializing Cloudflare bypass...");
@@ -524,18 +588,51 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             let html = '';
             let fetchSuccess = false;
             
-            // 0. Try to extract HTML immediately while renderer is responsive
+            // 0. Try to extract HTML via CDP (bypasses JS engine, immune to freezes)
             try {
-              html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
+              if (onProgress) onProgress(`Extracting HTML (CDP)...`);
+              if (!win.webContents.debugger.isAttached()) {
+                win.webContents.debugger.attach('1.3');
+              }
+              
+              const cdpWithTimeout = (command, params, ms = 5000) => {
+                return Promise.race([
+                  win.webContents.debugger.sendCommand(command, params),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error(`CDP ${command} timeout`)), ms))
+                ]);
+              };
+
+              const doc = await cdpWithTimeout('DOM.getDocument', { depth: 0 });
+              const res = await cdpWithTimeout('DOM.getOuterHTML', { nodeId: doc.root.nodeId });
+              html = res.outerHTML;
+              try { win.webContents.debugger.detach(); } catch(e) {}
+              
               if (html && html.length > 5000000) {
                 html = html.substring(0, 5000000);
               }
               if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
                 fetchSuccess = true;
-                console.log(`[TRACE] Extracted HTML immediately via executeJavaScript, length: ${html.length}`);
+                console.log(`[TRACE] Extracted HTML immediately via CDP, length: ${html.length}`);
               }
             } catch (e) {
-              console.log("Failed to extract HTML immediately:", e.message);
+              try { win.webContents.debugger.detach(); } catch(err) {}
+              console.log("Failed to extract HTML via CDP:", e.message);
+            }
+
+            // 0.5. Try to extract HTML immediately while renderer is responsive
+            if (!fetchSuccess) {
+              try {
+                html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
+                if (html && html.length > 5000000) {
+                  html = html.substring(0, 5000000);
+                }
+                if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
+                  fetchSuccess = true;
+                  console.log(`[TRACE] Extracted HTML immediately via executeJavaScript, length: ${html.length}`);
+                }
+              } catch (e) {
+                console.log("Failed to extract HTML immediately:", e.message);
+              }
             }
             
             // 1. Try session fetch if immediate extraction failed
@@ -750,6 +847,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 
 // Helper function to fetch with a strict timeout to prevent hanging, using Electron session for cookies
 async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null) {
+  setupAdblock();
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
   if (onProgress) onProgress("Fetching HTML (safe fallback)...");
   
