@@ -752,7 +752,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           }
         } catch (e) {
           // Ignore errors during execution, try again
-          lastState = \`Error in checkPage: \${e.message}\`;
+          lastState = `Error in checkPage: ${e.message}`;
           console.error(lastState);
           
           if (timeElapsed > 110) {
@@ -761,12 +761,12 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               clearTimeout(checkTimeout);
               clearTimeout(timeout);
               if (!existingWin) { try { win.destroy(); } catch (err) {} }
-              reject(new Error(\`Renderer frozen or timeout waiting for Cloudflare bypass. Last error: \${e.message}\`));
+              reject(new Error(`Renderer frozen or timeout waiting for Cloudflare bypass. Last error: ${e.message}`));
               return;
             }
           }
           
-          if (onProgress) onProgress(\`Waiting for window response (\${timeElapsed}s)...\`);
+          if (onProgress) onProgress(`Waiting for window response (${timeElapsed}s)...`);
           if (!resolved) checkTimeout = setTimeout(checkPage, 1000);
         }
       };
