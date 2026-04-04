@@ -362,6 +362,21 @@ function setupAdblock() {
       if (details.resourceType === 'media') {
         return callback({ cancel: true });
       }
+      
+      // Aggressively block third-party scripts to prevent renderer freezes
+      if (details.resourceType === 'script') {
+        try {
+          const urlObj = new URL(url);
+          const hostname = urlObj.hostname;
+          // Allow only essential scripts (Cloudflare, jQuery, and the main site)
+          if (!hostname.includes('imhentai.xxx') && 
+              !hostname.includes('cloudflare.com') && 
+              !hostname.includes('jquery.com') &&
+              !hostname.includes('cloudflareinsights.com')) {
+            return callback({ cancel: true });
+          }
+        } catch(e) {}
+      }
 
       callback({ cancel: false });
     });
@@ -588,37 +603,6 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             let html = '';
             let fetchSuccess = false;
             
-            // 0. Try to extract HTML via CDP (bypasses JS engine, immune to freezes)
-            try {
-              if (onProgress) onProgress(`Extracting HTML (CDP)...`);
-              if (!win.webContents.debugger.isAttached()) {
-                win.webContents.debugger.attach('1.3');
-              }
-              
-              const cdpWithTimeout = (command, params, ms = 5000) => {
-                return Promise.race([
-                  win.webContents.debugger.sendCommand(command, params),
-                  new Promise((_, reject) => setTimeout(() => reject(new Error(`CDP ${command} timeout`)), ms))
-                ]);
-              };
-
-              const doc = await cdpWithTimeout('DOM.getDocument', { depth: 0 });
-              const res = await cdpWithTimeout('DOM.getOuterHTML', { nodeId: doc.root.nodeId });
-              html = res.outerHTML;
-              try { win.webContents.debugger.detach(); } catch(e) {}
-              
-              if (html && html.length > 5000000) {
-                html = html.substring(0, 5000000);
-              }
-              if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
-                fetchSuccess = true;
-                console.log(`[TRACE] Extracted HTML immediately via CDP, length: ${html.length}`);
-              }
-            } catch (e) {
-              try { win.webContents.debugger.detach(); } catch(err) {}
-              console.log("Failed to extract HTML via CDP:", e.message);
-            }
-
             // 0.5. Try to extract HTML immediately while renderer is responsive
             if (!fetchSuccess) {
               try {
