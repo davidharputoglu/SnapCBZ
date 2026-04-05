@@ -487,8 +487,12 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
       }, 120000); // Increased to 120s to give user time to solve captcha
 
       const executeWithTimeout = (script, ms = 2000) => {
+        const execPromise = win.webContents.executeJavaScript(script).catch(err => {
+          // Ignore errors if the race already finished or window is destroyed
+          return null;
+        });
         return Promise.race([
-          win.webContents.executeJavaScript(script),
+          execPromise,
           new Promise((_, reject) => setTimeout(() => reject(new Error('Script timeout')), ms))
         ]);
       };
@@ -506,9 +510,14 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               console.log("Access denied/403 detected, clearing cookies and retrying...");
               if (onProgress) onProgress("Access denied. Clearing cookies and retrying...");
               try {
-                await session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] });
+                await Promise.race([
+                  session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('clearStorageData timeout')), 3000))
+                ]);
                 win.reload();
-              } catch(e) {}
+              } catch(e) {
+                try { win.reload(); } catch(err) {}
+              }
               if (!resolved) checkTimeout = setTimeout(checkPage, 2000);
               return;
             }
@@ -561,9 +570,14 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                console.log("Stuck in Cloudflare loop, clearing cookies...");
                if (onProgress) onProgress("Clearing cookies to bypass block...");
                try {
-                 await session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] });
+                 await Promise.race([
+                   session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] }),
+                   new Promise((_, reject) => setTimeout(() => reject(new Error('clearStorageData timeout')), 3000))
+                 ]);
                  win.reload();
-               } catch(e) {}
+               } catch(e) {
+                 try { win.reload(); } catch(err) {}
+               }
                if (!resolved) checkTimeout = setTimeout(checkPage, 2000);
                return;
             }
@@ -626,7 +640,15 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                 const scraperSession = session.fromPartition('persist:scraper');
                 
                 // Get cookies manually to ensure they are sent
-                const cookies = await scraperSession.cookies.get({ url: urlObj.origin });
+                let cookies = [];
+                try {
+                  cookies = await Promise.race([
+                    scraperSession.cookies.get({ url: urlObj.origin }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('Cookies get timeout')), 3000))
+                  ]);
+                } catch (cookieErr) {
+                  console.log("Failed to get cookies:", cookieErr.message);
+                }
                 const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
                 
                 const fetchController = new AbortController();
@@ -732,9 +754,15 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               console.log("Extraction stuck, clearing cookies and reloading...");
               if (onProgress) onProgress("Extraction stuck. Reloading...");
               try {
-                await session.fromPartition('persist:scraper').clearStorageData({ storages: ['serviceworkers', 'caches'] });
+                await Promise.race([
+                  session.fromPartition('persist:scraper').clearStorageData({ storages: ['serviceworkers', 'caches'] }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('clearStorageData timeout')), 3000))
+                ]);
                 win.reload();
-              } catch(e) {}
+              } catch(e) {
+                console.log("Failed to clear storage data:", e.message);
+                try { win.reload(); } catch(err) {}
+              }
             } else if (timeElapsed > 110) {
               // Close to the 120s hard timeout, just resolve with what we have or reject
               if (!resolved) {
