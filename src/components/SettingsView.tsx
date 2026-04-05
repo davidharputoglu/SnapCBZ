@@ -390,7 +390,8 @@ export const SettingsView: React.FC = () => {
                     value="cbz"
                     checked={(settings.manhwaFormat || "cbz") === "cbz"}
                     onChange={() => updateSettings({ manhwaFormat: "cbz" })}
-                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary accent-primary"
+                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary"
+                    style={{ accentColor: 'var(--primary)' }}
                   />
                   <span className="text-sm text-foreground">
                     {t("set_manhwa_format_cbz")}
@@ -403,7 +404,8 @@ export const SettingsView: React.FC = () => {
                     value="images"
                     checked={settings.manhwaFormat === "images"}
                     onChange={() => updateSettings({ manhwaFormat: "images" })}
-                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary accent-primary"
+                    className="w-4 h-4 text-primary bg-background border-border focus:ring-primary"
+                    style={{ accentColor: 'var(--primary)' }}
                   />
                   <span className="text-sm text-foreground">
                     {t("set_manhwa_format_images")}
@@ -417,7 +419,7 @@ export const SettingsView: React.FC = () => {
                 label={t("set_manhwa_dir")}
                 value={settings.manhwaDirectory || ""}
                 onChange={(v) => updateSettings({ manhwaDirectory: v })}
-                icon={<Folder className="w-5 h-5 text-muted-foreground" />}
+                icon={<Folder className="w-5 h-5 text-primary" />}
               />
             </div>
           </div>

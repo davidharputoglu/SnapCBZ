@@ -192,7 +192,7 @@ async function autoLogin(siteUrl, username, password) {
   return loginPromise;
 }
 
-export async function fastFetchHtml(url, existingWin = null, taskState = null, onProgress = null) {
+export async function fastFetchHtml(url, existingWin = null, taskState = null, onProgress = null, skipElectronFallback = false) {
   setupAdblock();
   try {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
@@ -300,6 +300,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
                               html.includes('challenge-stage');
 
     if (isCloudflareBlock) {
+      if (skipElectronFallback) throw new Error("Cloudflare block detected in fastFetchHtml (fallback disabled)");
       return await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
     }
     
@@ -497,12 +498,17 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
         ]);
       };
 
+      let consecutiveTimeouts = 0;
+
       const checkPage = async () => {
         if (resolved) return;
         const timeElapsed = Math.floor((Date.now() - startTime) / 1000);
         try {
           const title = await executeWithTimeout('document.title || ""');
           const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
+          
+          // Reset consecutive timeouts on success
+          consecutiveTimeouts = 0;
           
           if (title.includes('502 Bad Gateway') || title.includes('504 Gateway Time-out') || title.includes('404 Not Found') || title.includes('Access denied') || title.includes('403 Forbidden')) {
             if (!hasClearedCookies && (title.includes('Access denied') || title.includes('403 Forbidden'))) {
@@ -783,6 +789,20 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           lastState = `Error in checkPage: ${e.message}`;
           console.error(lastState);
           
+          if (e.message === 'Script timeout') {
+            consecutiveTimeouts++;
+            if (consecutiveTimeouts >= 3) {
+              if (!resolved) {
+                resolved = true;
+                if (typeof checkTimeout !== 'undefined') clearTimeout(checkTimeout);
+                clearTimeout(timeout);
+                if (!existingWin) { try { win.destroy(); } catch (err) {} }
+                reject(new Error("Renderer process appears to be frozen (multiple script timeouts)."));
+                return;
+              }
+            }
+          }
+          
           if (timeElapsed > 110) {
             if (!resolved) {
               resolved = true;
@@ -866,7 +886,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 }
 
 // Helper function to fetch with a strict timeout to prevent hanging, using Electron session for cookies
-async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null) {
+async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null, skipElectronFallback = false) {
   setupAdblock();
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
   if (onProgress) onProgress("Fetching HTML (safe fallback)...");
@@ -941,6 +961,7 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
                               ));
 
     if (isCloudflareBlock) {
+      if (skipElectronFallback) throw new Error("Cloudflare block detected in safeGet (fallback disabled)");
       const html = await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
       return { data: html, status: 200, headers: res.headers };
     }
@@ -950,6 +971,7 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
     clearTimeout(timeoutId);
     if (err.response && (err.response.status === 403 || err.response.status === 503)) {
       try {
+        if (skipElectronFallback) throw new Error("Cloudflare block detected in safeGet (fallback disabled)");
         const html = await fetchHtmlWithElectron(url, existingWin, taskState, onProgress);
         return { data: html, status: 200, headers: new Headers() };
       } catch (cfError) {
@@ -960,7 +982,7 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
     // Fallback to fastFetchHtml if safeGet fails
     console.log(`safeGet failed for ${url}, falling back to fastFetchHtml:`, err.message);
     try {
-      const html = await fastFetchHtml(url, existingWin, taskState, onProgress);
+      const html = await fastFetchHtml(url, existingWin, taskState, onProgress, skipElectronFallback);
       return { data: html, status: 200, headers: new Headers() };
     } catch (fastFetchErr) {
       throw new Error(`safeGet and fastFetchHtml failed: ${err.message} | ${fastFetchErr.message}`);
@@ -1003,6 +1025,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         let currentUrl = url;
         let pagesFetched = 0;
         const visitedUrls = new Set();
+        let preferSafeGet = false;
         
         const defaultUserAgent = session.defaultSession.getUserAgent();
         const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -1028,11 +1051,21 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
+            if (preferSafeGet) {
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+              html = res.data;
+            } else {
+              html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
+            }
           } catch (e) {
-            console.log(`fetchHtmlWithElectron failed for ${currentUrl}, falling back to safeGet:`, e.message);
-            const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin);
-            html = res.data;
+            if (!preferSafeGet) {
+              console.log(`fetchHtmlWithElectron failed for ${currentUrl}, falling back to safeGet and preferring it for future pages:`, e.message);
+              preferSafeGet = true;
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+              html = res.data;
+            } else {
+              throw e;
+            }
           }
           const $ = cheerio.load(html);
           let found = 0;
@@ -1071,6 +1104,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         let currentUrl = url;
         let pagesFetched = 0;
         const visitedUrls = new Set();
+        let preferSafeGet = false;
         while (currentUrl && pagesFetched < 50) {
           if (visitedUrls.has(currentUrl)) break;
           visitedUrls.add(currentUrl);
@@ -1078,10 +1112,21 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            html = await fastFetchHtml(currentUrl, null, taskState, onProgress);
+            if (preferSafeGet) {
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, null, true);
+              html = res.data;
+            } else {
+              html = await fastFetchHtml(currentUrl, null, taskState, onProgress);
+            }
           } catch (e) {
-            const res = await safeGet(currentUrl, {}, taskState, onProgress, null);
-            html = res.data;
+            if (!preferSafeGet) {
+              console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet and preferring it for future pages:`, e.message);
+              preferSafeGet = true;
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, null, true);
+              html = res.data;
+            } else {
+              throw e;
+            }
           }
           const $ = cheerio.load(html);
           let found = 0;
@@ -1119,6 +1164,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         let currentUrl = url;
         let pagesFetched = 0;
         const visitedUrls = new Set();
+        let preferSafeGet = false;
         
         const defaultUserAgent = session.defaultSession.getUserAgent();
         const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -1144,12 +1190,22 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
+            if (preferSafeGet) {
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+              html = res.data;
+            } else {
+              html = await fastFetchHtml(currentUrl, scraperWin, taskState, onProgress);
+            }
           } catch (e) {
-            console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet:`, e.message);
-            if (e.message.includes('Cloudflare bypass')) throw e;
-            const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin);
-            html = res.data;
+            if (!preferSafeGet) {
+              console.log(`fastFetchHtml failed for ${currentUrl}, falling back to safeGet and preferring it for future pages:`, e.message);
+              if (e.message.includes('Cloudflare bypass')) throw e;
+              preferSafeGet = true;
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+              html = res.data;
+            } else {
+              throw e;
+            }
           }
           const $ = cheerio.load(html);
           let found = 0;
@@ -1191,7 +1247,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           if (e.message.includes('Cloudflare bypass')) throw e;
-          const res = await safeGet(url, {}, taskState, onProgress, null);
+          const res = await safeGet(url, {}, taskState, onProgress, null, true);
           html = res.data;
         }
         const $ = cheerio.load(html);
@@ -1502,7 +1558,7 @@ export async function startDownload(task, win, settings) {
         try {
           html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
         } catch (e) {
-          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
+          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null, true);
           html = res.data;
         }
         const $ = cheerio.load(html);
@@ -1572,13 +1628,13 @@ export async function startDownload(task, win, settings) {
         } catch (e) {
           console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, e.message);
           try {
-            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
             html = res.data;
             console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
           } catch (safeGetErr) {
             console.log(`safeGet failed for ${url}, falling back to fastFetchHtml:`, safeGetErr.message);
             try {
-              html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+              html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), true);
               console.log(`[TRACE] fastFetchHtml resolved for ${url}, html length: ${html ? html.length : 0}`);
             } catch (fastFetchErr) {
               console.log(`fastFetchHtml failed for ${url}, falling back to basic axios:`, fastFetchErr.message);
@@ -1771,7 +1827,7 @@ export async function startDownload(task, win, settings) {
           } catch (e) {
             console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
             if (e.message.includes('Cloudflare bypass')) throw e;
-            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
             html = res.data;
           }
           const $ = cheerio.load(html);
@@ -1852,7 +1908,7 @@ export async function startDownload(task, win, settings) {
         } catch (e) {
           console.log(`fastFetchHtml failed for ${url}, falling back to safeGet:`, e.message);
           if (e.message.includes('Cloudflare bypass')) throw e;
-          const response = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin);
+          const response = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
           html = response.data;
         }
       }
