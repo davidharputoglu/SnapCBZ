@@ -1025,7 +1025,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         let currentUrl = url;
         let pagesFetched = 0;
         const visitedUrls = new Set();
-        let preferSafeGet = false;
+        let preferSafeGet = true;
         
         const defaultUserAgent = session.defaultSession.getUserAgent();
         const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -1051,9 +1051,14 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            if (preferSafeGet) {
-              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
-              html = res.data;
+            if (preferSafeGet || pagesFetched > 0) {
+              try {
+                const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+                html = res.data;
+              } catch (safeErr) {
+                console.log(`safeGet failed for page ${pagesFetched + 1}, falling back to fetchHtmlWithElectron:`, safeErr.message);
+                html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
+              }
             } else {
               html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
             }
@@ -1618,21 +1623,20 @@ export async function startDownload(task, win, settings) {
         }
         
         try {
-          // For imhentai, directly use Electron window to ensure we bypass any advanced protections
-          html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
-          console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
+          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, false);
+          html = res.data;
+          console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
           
           if (!html || html.length < 100) {
             throw new Error("HTML is empty or too short");
           }
         } catch (e) {
-          console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, e.message);
+          console.log(`safeGet failed for ${url}, falling back to fetchHtmlWithElectron:`, e.message);
           try {
-            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
-            html = res.data;
-            console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
-          } catch (safeGetErr) {
-            console.log(`safeGet failed for ${url}, falling back to fastFetchHtml:`, safeGetErr.message);
+            html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+            console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
+          } catch (electronErr) {
+            console.log(`fetchHtmlWithElectron failed for ${url}, falling back to fastFetchHtml:`, electronErr.message);
             try {
               html = await fastFetchHtml(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), true);
               console.log(`[TRACE] fastFetchHtml resolved for ${url}, html length: ${html ? html.length : 0}`);
