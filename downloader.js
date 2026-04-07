@@ -252,9 +252,11 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
     
     const controller = new AbortController();
     if (taskState && taskState.controllers) taskState.controllers.push(controller);
-    const timeoutId = setTimeout(() => controller.abort(), 15000);
     
-    const fetchPromise = scraperSession.fetch(url, {
+    let fetchTimeoutId;
+    let parseTimeoutId;
+    
+    const fetchOptions = {
       headers: {
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
         'Accept-Language': 'en-US,en;q=0.9',
@@ -270,20 +272,26 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
         'Referer': url
       },
       signal: controller.signal
-    });
+    };
     
-    const res = await Promise.race([
-      fetchPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
-    ]);
+    fetchTimeoutId = setTimeout(() => controller.abort(), 15000);
     
-    clearTimeout(timeoutId);
+    const res = await scraperSession.fetch(url, fetchOptions);
+    
+    clearTimeout(fetchTimeoutId);
     
     const textPromise = res.text();
-    const html = await Promise.race([
-      textPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Text parsing timeout')), 15000))
-    ]);
+    
+    parseTimeoutId = setTimeout(() => controller.abort(), 15000);
+    
+    let html;
+    try {
+      html = await textPromise;
+      clearTimeout(parseTimeoutId);
+    } catch (parseErr) {
+      clearTimeout(parseTimeoutId);
+      throw new Error(`Data parsing failed or timed out: ${parseErr.message}`);
+    }
     
     if (taskState && taskState.controllers) {
       const idx = taskState.controllers.indexOf(controller);
@@ -306,6 +314,8 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
     
     return html;
   } catch (err) {
+    if (typeof fetchTimeoutId !== 'undefined') clearTimeout(fetchTimeoutId);
+    if (typeof parseTimeoutId !== 'undefined') clearTimeout(parseTimeoutId);
     throw err;
   }
 }
@@ -603,8 +613,9 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           // Ensure page has actually loaded some content (not just a blank page during redirect)
           const readyState = await executeWithTimeout('document.readyState');
           const imgCount = await executeWithTimeout('document.querySelectorAll("img").length');
+          const isImhentaiLoaded = await executeWithTimeout('window.location.hostname.includes("imhentai") && document.querySelector(".right_details, .gallery_content, .gthumb, .inner_thumb") !== null');
           
-          if (readyState === 'loading' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500)) {
+          if (!isImhentaiLoaded && (readyState === 'loading' || bodyText.length < 100 || title.trim() === '' || (imgCount === 0 && bodyText.length < 500))) {
             lastState = `Waiting for page load: readyState=${readyState}, bodyText.length=${bodyText.length}, title="${title}", imgCount=${imgCount}`;
             console.log(lastState);
             if (onProgress) onProgress(`Loading page (${timeElapsed}s)...`);
@@ -900,7 +911,9 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
   
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
-  const timeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
+  
+  let fetchTimeoutId;
+  let parseTimeoutId;
   
   try {
     const scraperSession = session.fromPartition('persist:scraper');
@@ -926,19 +939,11 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
       signal: controller.signal
     };
 
-    const fetchPromise = scraperSession.fetch(url, fetchOptions);
+    fetchTimeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
     
-    const res = await Promise.race([
-      fetchPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 20000))
-    ]);
+    const res = await scraperSession.fetch(url, fetchOptions);
     
-    if (taskState && taskState.controllers) {
-      const idx = taskState.controllers.indexOf(controller);
-      if (idx > -1) taskState.controllers.splice(idx, 1);
-    }
-    
-    clearTimeout(timeoutId);
+    clearTimeout(fetchTimeoutId);
     
     if (!res.ok) {
       const error = new Error(`HTTP error! status: ${res.status}`);
@@ -950,10 +955,21 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
     let data;
     
     const parsePromise = contentType.includes('application/json') ? res.json() : res.text();
-    data = await Promise.race([
-      parsePromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Data parsing timeout')), 20000))
-    ]);
+    
+    parseTimeoutId = setTimeout(() => controller.abort(), 20000);
+    
+    try {
+      data = await parsePromise;
+      clearTimeout(parseTimeoutId);
+    } catch (parseErr) {
+      clearTimeout(parseTimeoutId);
+      throw new Error(`Data parsing failed or timed out: ${parseErr.message}`);
+    }
+    
+    if (taskState && taskState.controllers) {
+      const idx = taskState.controllers.indexOf(controller);
+      if (idx > -1) taskState.controllers.splice(idx, 1);
+    }
     
     // Check for Cloudflare block in the response
     const isCloudflareBlock = res.status === 403 || res.status === 503 || 
@@ -980,7 +996,8 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
 
     return { data, status: res.status, headers: res.headers };
   } catch (err) {
-    clearTimeout(timeoutId);
+    if (fetchTimeoutId) clearTimeout(fetchTimeoutId);
+    if (parseTimeoutId) clearTimeout(parseTimeoutId);
     if (err.response && (err.response.status === 403 || err.response.status === 503)) {
       try {
         if (skipElectronFallback) throw new Error("Cloudflare block detected in safeGet (fallback disabled)");
@@ -1818,7 +1835,7 @@ export async function startDownload(task, win, settings) {
           }
         } else {
           // Fallback if g_th or baseUrl fails
-          $('.gthumb img, .thumb img, .gallery_thumb img').each((i, el) => {
+          $('.gthumb img, .thumb img, .gallery_thumb img, .inner_thumb img').each((i, el) => {
             let src = $(el).attr('data-src') || $(el).attr('src');
             if (src) {
               // Convert thumbnail URL to full image URL
