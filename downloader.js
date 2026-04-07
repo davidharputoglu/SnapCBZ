@@ -1037,7 +1037,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
         let currentUrl = url;
         let pagesFetched = 0;
         const visitedUrls = new Set();
-        let preferSafeGet = true;
+        let preferSafeGet = false;
         
         const defaultUserAgent = session.defaultSession.getUserAgent();
         const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -1063,32 +1063,17 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           if (onProgress) onProgress(`Scraping links (page ${pagesFetched + 1})...`);
           let html = '';
           try {
-            if (preferSafeGet || pagesFetched > 0) {
+            if (!preferSafeGet || pagesFetched > 0) {
               try {
+                html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
+              } catch (electronErr) {
+                console.log(`fetchHtmlWithElectron failed for page ${pagesFetched + 1}, falling back to safeGet:`, electronErr.message);
                 const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
                 html = res.data;
-              } catch (safeErr) {
-                console.log(`safeGet failed for page ${pagesFetched + 1}, falling back to fetchHtmlWithElectron:`, safeErr.message);
-                if (scraperWin && !scraperWin.isDestroyed()) {
-                  try { scraperWin.destroy(); } catch(err) {}
-                }
-                scraperWin = new BrowserWindow({
-                  show: false,
-                  width: 800,
-                  height: 600,
-                  webPreferences: {
-                    partition: 'persist:scraper',
-                    nodeIntegration: false,
-                    contextIsolation: true,
-                    webSecurity: true
-                  }
-                });
-                taskState.scraperWin = scraperWin;
-                scraperWin.webContents.userAgent = cleanUserAgent;
-                html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
               }
             } else {
-              html = await fetchHtmlWithElectron(currentUrl, scraperWin, taskState, onProgress);
+              const res = await safeGet(currentUrl, {}, taskState, onProgress, scraperWin, true);
+              html = res.data;
             }
           } catch (e) {
             console.log(`HTML extraction failed for ${currentUrl}:`, e.message);
@@ -1677,20 +1662,7 @@ export async function startDownload(task, win, settings) {
         }
         
         try {
-          const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, false);
-          html = res.data;
-          console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
-          
-          if (!html || html.length < 100) {
-            throw new Error("HTML is empty or too short");
-          }
-        } catch (e) {
-          console.log(`safeGet failed for ${url}, falling back to fetchHtmlWithElectron:`, e.message);
-          
-          // Recreate scraperWin in case it was frozen during safeGet's internal fallbacks
-          if (scraperWin && !scraperWin.isDestroyed()) {
-            try { scraperWin.destroy(); } catch(err) {}
-          }
+          // Try fetchHtmlWithElectron first for imhentai as safeGet seems to hang on safe fallback
           scraperWin = new BrowserWindow({
             show: false,
             width: 800,
@@ -1703,13 +1675,30 @@ export async function startDownload(task, win, settings) {
             }
           });
           taskState.scraperWin = scraperWin;
+          
+          const defaultUserAgent = session.defaultSession.getUserAgent();
+          const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
           scraperWin.webContents.userAgent = cleanUserAgent;
 
+          html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+          console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
+          
+          if (!html || html.length < 100) {
+            throw new Error("HTML is empty or too short");
+          }
+        } catch (electronErr) {
+          console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, electronErr.message);
+          
           try {
-            html = await fetchHtmlWithElectron(url, scraperWin, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
-            console.log(`[TRACE] fetchHtmlWithElectron resolved for ${url}, html length: ${html ? html.length : 0}`);
-          } catch (electronErr) {
-            console.log(`fetchHtmlWithElectron failed for ${url}:`, electronErr.message);
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, false);
+            html = res.data;
+            console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
+            
+            if (!html || html.length < 100) {
+              throw new Error("HTML is empty or too short");
+            }
+          } catch (safeErr) {
+            console.log(`safeGet failed for ${url}:`, safeErr.message);
             throw new Error("All HTML extraction methods failed for imhentai.");
           }
         }
