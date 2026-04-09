@@ -276,7 +276,11 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
     
     fetchTimeoutId = setTimeout(() => controller.abort(), 15000);
     
-    const res = await scraperSession.fetch(url, fetchOptions);
+    const fetchPromise = scraperSession.fetch(url, fetchOptions);
+    const res = await Promise.race([
+      fetchPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 15000))
+    ]);
     
     clearTimeout(fetchTimeoutId);
     
@@ -286,7 +290,10 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
     
     let html;
     try {
-      html = await textPromise;
+      html = await Promise.race([
+        textPromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Parse timeout')), 15000))
+      ]);
       clearTimeout(parseTimeoutId);
     } catch (parseErr) {
       clearTimeout(parseTimeoutId);
@@ -941,7 +948,11 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
 
     fetchTimeoutId = setTimeout(() => controller.abort(), 20000); // 20 seconds strict timeout
     
-    const res = await scraperSession.fetch(url, fetchOptions);
+    const fetchPromise = scraperSession.fetch(url, fetchOptions);
+    const res = await Promise.race([
+      fetchPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Fetch timeout')), 20000))
+    ]);
     
     clearTimeout(fetchTimeoutId);
     
@@ -959,7 +970,10 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
     parseTimeoutId = setTimeout(() => controller.abort(), 20000);
     
     try {
-      data = await parsePromise;
+      data = await Promise.race([
+        parsePromise,
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Parse timeout')), 20000))
+      ]);
       clearTimeout(parseTimeoutId);
     } catch (parseErr) {
       clearTimeout(parseTimeoutId);
@@ -1707,7 +1721,7 @@ export async function startDownload(task, win, settings) {
           console.log(`fetchHtmlWithElectron failed for ${url}, falling back to safeGet:`, electronErr.message);
           
           try {
-            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, false);
+            const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
             html = res.data;
             console.log(`[TRACE] safeGet resolved for ${url}, html length: ${html ? html.length : 0}`);
             
