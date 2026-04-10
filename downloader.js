@@ -521,8 +521,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
         if (resolved) return;
         const timeElapsed = Math.floor((Date.now() - startTime) / 1000);
         try {
-          const title = await executeWithTimeout('document.title || ""');
-          const bodyText = await executeWithTimeout('document.body ? document.body.innerText : ""');
+          const title = await executeWithTimeout('document.title ? document.title.substring(0, 1000) : ""');
+          const bodyText = await executeWithTimeout('document.body ? document.body.innerText.substring(0, 50000) : ""');
           
           // Reset consecutive timeouts on success
           consecutiveTimeouts = 0;
@@ -645,10 +645,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             // 0.5. Try to extract HTML immediately while renderer is responsive
             if (!fetchSuccess) {
               try {
-                html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
-                if (html && html.length > 5000000) {
-                  html = html.substring(0, 5000000);
-                }
+                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 5000000) : ""', 5000);
                 if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
                   fetchSuccess = true;
                   console.log(`[TRACE] Extracted HTML immediately via executeJavaScript, length: ${html.length}`);
@@ -734,11 +731,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
               try {
                 // Use a very short timeout for the fallback to avoid hanging
-                html = await executeWithTimeout('document.documentElement.outerHTML', 5000);
-                if (html && html.length > 5000000) {
-                  console.warn(`[WARNING] Fallback HTML is extremely large (${html.length} bytes), truncating.`);
-                  html = html.substring(0, 5000000);
-                }
+                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 5000000) : ""', 5000);
                 fetchSuccess = true;
               } catch (execErr) {
                 console.log("executeJavaScript fallback failed:", execErr.message);
@@ -749,10 +742,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!fetchSuccess) {
                if (onProgress) onProgress(`Extracting HTML (safe fallback)...`);
                try {
-                 html = await executeWithTimeout('document.body.innerHTML', 3000);
-                 if (html && html.length > 5000000) {
-                    html = html.substring(0, 5000000);
-                 }
+                 html = await executeWithTimeout('document.body.innerHTML ? document.body.innerHTML.substring(0, 5000000) : ""', 3000);
                  // Wrap it in basic HTML structure so cheerio doesn't complain
                  html = `<html><body>${html}</body></html>`;
                  fetchSuccess = true;
