@@ -220,7 +220,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
                 clearTimeout(timeoutId);
                 return res.text();
               })
-              .then(resolve)
+              .then(text => resolve(text ? text.substring(0, 2000000) : ""))
               .catch(err => {
                 clearTimeout(timeoutId);
                 reject(err);
@@ -642,18 +642,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             let html = '';
             let fetchSuccess = false;
             
-            // 0.5. Try to extract HTML immediately while renderer is responsive
-            if (!fetchSuccess) {
-              try {
-                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 5000000) : ""', 5000);
-                if (html && html.length > 1000 && !html.includes('Just a moment') && !html.includes('Cloudflare')) {
-                  fetchSuccess = true;
-                  console.log(`[TRACE] Extracted HTML immediately via executeJavaScript, length: ${html.length}`);
-                }
-              } catch (e) {
-                console.log("Failed to extract HTML immediately:", e.message);
-              }
-            }
+            // 0.5 removed to prevent IPC freezes. Relying on session fetch.
             
             // 1. Try session fetch if immediate extraction failed
             if (!fetchSuccess) {
@@ -731,7 +720,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
               try {
                 // Use a very short timeout for the fallback to avoid hanging
-                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 5000000) : ""', 5000);
+                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 2000000) : ""', 5000);
                 fetchSuccess = true;
               } catch (execErr) {
                 console.log("executeJavaScript fallback failed:", execErr.message);
@@ -742,7 +731,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!fetchSuccess) {
                if (onProgress) onProgress(`Extracting HTML (safe fallback)...`);
                try {
-                 html = await executeWithTimeout('document.body.innerHTML ? document.body.innerHTML.substring(0, 5000000) : ""', 3000);
+                 html = await executeWithTimeout('document.body.innerHTML ? document.body.innerHTML.substring(0, 2000000) : ""', 3000);
                  // Wrap it in basic HTML structure so cheerio doesn't complain
                  html = `<html><body>${html}</body></html>`;
                  fetchSuccess = true;
@@ -1791,27 +1780,31 @@ export async function startDownload(task, win, settings) {
         // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
         // w = .webp, j = .jpg, p = .png, g = .gif
         let gTh = {};
-        const htmlContent = $.html();
-        const gThMatch = htmlContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"](.*?)['"]\)/);
-        if (gThMatch) {
-          try {
-            // IMHentai escapes quotes in the JSON string: '{\"1\":[\"j\",1074,1516]}'
-            const unescapedJson = gThMatch[1].replace(/\\"/g, '"');
-            gTh = JSON.parse(unescapedJson);
-          } catch (e) {
-            console.error("Failed to parse g_th JSON", e);
-          }
-        } else {
-          // Try alternative format if they stopped using $.parseJSON
-          const gThDirectMatch = htmlContent.match(/var\s+g_th\s*=\s*(\{[\s\S]*?\});/);
-          if (gThDirectMatch) {
-            try {
-              gTh = JSON.parse(gThDirectMatch[1]);
-            } catch (e) {
-              console.error("Failed to parse direct g_th JSON", e);
+        $('script').each((i, el) => {
+          const scriptContent = $(el).html();
+          if (scriptContent && scriptContent.includes('g_th')) {
+            const gThMatch = scriptContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"](.*?)['"]\)/);
+            if (gThMatch) {
+              try {
+                // IMHentai escapes quotes in the JSON string: '{\"1\":[\"j\",1074,1516]}'
+                const unescapedJson = gThMatch[1].replace(/\\"/g, '"');
+                gTh = JSON.parse(unescapedJson);
+              } catch (e) {
+                console.error("Failed to parse g_th JSON", e);
+              }
+            } else {
+              // Try alternative format if they stopped using $.parseJSON
+              const gThDirectMatch = scriptContent.match(/var\s+g_th\s*=\s*(\{[\s\S]*?\});/);
+              if (gThDirectMatch) {
+                try {
+                  gTh = JSON.parse(gThDirectMatch[1]);
+                } catch (e) {
+                  console.error("Failed to parse direct g_th JSON", e);
+                }
+              }
             }
           }
-        }
+        });
 
         let totalPages = Object.keys(gTh).length || loadPages;
         if (totalPages > 10000) {
