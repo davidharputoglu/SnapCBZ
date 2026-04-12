@@ -154,6 +154,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (str === "Scraping site...") return t("status_scraping_site" as any);
     if (str === "Please wait or solve the captcha if necessary...") return t("cf_wait" as any);
     if (str === "Extracting HTML...") return t("status_extracting_html" as any);
+    if (str === "Parsing HTML...") return t("status_parsing_html" as any) || "Parsing HTML...";
     if (str === "Extracting HTML (CDP)...") return t("status_extracting_html_cdp" as any) || "Extracting HTML (CDP)...";
     if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
     if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
@@ -216,6 +217,7 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (retryingHtmlMatch) return t("status_retrying_html" as any, { time: retryingHtmlMatch[1] });
     
     if (str === "Extracting HTML...") return t("status_extracting_html" as any);
+    if (str === "Parsing HTML...") return t("status_parsing_html" as any) || "Parsing HTML...";
     if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
     if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
     if (str === "Logging in...") return t("status_logging_in" as any);

@@ -290,6 +290,7 @@ export const translations = {
     status_waiting_window: "Attente de la réponse de la fenêtre ({time}s)...",
     status_retrying_html: "Nouvelle tentative d'extraction HTML ({time}s)...",
     status_extracting_html: "Extraction du HTML...",
+    status_parsing_html: "Analyse du HTML...",
     status_extracting_html_cdp: "Extraction du HTML (CDP)...",
     status_extracting_html_fallback: "Extraction du HTML (secours)...",
     status_extracting_html_safe: "Extraction du HTML (secours sûr)...",

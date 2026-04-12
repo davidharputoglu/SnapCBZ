@@ -220,7 +220,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
                 clearTimeout(timeoutId);
                 return res.text();
               })
-              .then(text => resolve(text ? text.substring(0, 2000000) : ""))
+              .then(text => resolve(text && text.length > 5000000 ? "" : text))
               .catch(err => {
                 clearTimeout(timeoutId);
                 reject(err);
@@ -699,8 +699,8 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
                 ]);
                 
                 if (fetchedHtml && fetchedHtml.length > 5000000) {
-                  console.warn(`[WARNING] HTML is extremely large (${fetchedHtml.length} bytes), truncating to prevent freeze.`);
-                  fetchedHtml = fetchedHtml.substring(0, 5000000);
+                  console.warn(`[WARNING] HTML is extremely large (${fetchedHtml.length} bytes), discarding to prevent freeze.`);
+                  fetchedHtml = "";
                 }
                 
                 clearTimeout(fetchTimeoutId);
@@ -721,8 +721,19 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!fetchSuccess) {
               if (onProgress) onProgress(`Extracting HTML (fallback)...`);
               try {
-                // Use a very short timeout for the fallback to avoid hanging
-                html = await executeWithTimeout('document.documentElement.outerHTML ? document.documentElement.outerHTML.substring(0, 2000000) : ""', 5000);
+                const script = `
+                  (function() {
+                    let html = document.documentElement.outerHTML;
+                    if (html && html.length > 5000000) {
+                      html = document.body ? document.body.innerHTML : "";
+                      if (html && html.length > 5000000) {
+                        return "";
+                      }
+                    }
+                    return html || "";
+                  })();
+                `;
+                html = await executeWithTimeout(script, 5000);
                 if (html && html.length > 100) {
                   fetchSuccess = true;
                 }
@@ -735,7 +746,13 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!fetchSuccess) {
                if (onProgress) onProgress(`Extracting HTML (safe fallback)...`);
                try {
-                 html = await executeWithTimeout('document.body.innerHTML ? document.body.innerHTML.substring(0, 2000000) : ""', 3000);
+                 const script = `
+                   (function() {
+                     let html = document.body ? document.body.innerHTML : "";
+                     return (html && html.length > 5000000) ? "" : html;
+                   })();
+                 `;
+                 html = await executeWithTimeout(script, 3000);
                  if (html && html.length > 100) {
                    // Wrap it in basic HTML structure so cheerio doesn't complain
                    html = `<html><body>${html}</body></html>`;
