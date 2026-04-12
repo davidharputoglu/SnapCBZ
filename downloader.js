@@ -1722,8 +1722,12 @@ export async function startDownload(task, win, settings) {
         }
         
         console.log(`[TRACE] Loading HTML into cheerio...`);
+        if (onProgress) onProgress("Parsing HTML...");
+        // Yield event loop to ensure progress message is sent before potentially blocking cheerio.load
+        await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         console.log(`[TRACE] Cheerio loaded.`);
+        if (onProgress) onProgress("Extracting metadata...");
         title = $('h1').text().trim();
         
         // Extract artist
@@ -1787,29 +1791,34 @@ export async function startDownload(task, win, settings) {
         // Extract the g_th JSON which contains the extensions for each page
         // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
         // w = .webp, j = .jpg, p = .png, g = .gif
+        if (onProgress) onProgress("Extracting image data...");
         let gTh = {};
         $('script').each((i, el) => {
           const scriptContent = $(el).html();
           if (scriptContent && scriptContent.includes('g_th')) {
-            const gThMatch = scriptContent.match(/var\s+g_th\s*=\s*\$\.parseJSON\(['"](.*?)['"]\)/);
-            if (gThMatch) {
-              try {
-                // IMHentai escapes quotes in the JSON string: '{\"1\":[\"j\",1074,1516]}'
-                const unescapedJson = gThMatch[1].replace(/\\"/g, '"');
-                gTh = JSON.parse(unescapedJson);
-              } catch (e) {
-                console.error("Failed to parse g_th JSON", e);
-              }
-            } else {
-              // Try alternative format if they stopped using $.parseJSON
-              const gThDirectMatch = scriptContent.match(/var\s+g_th\s*=\s*(\{[\s\S]*?\});/);
-              if (gThDirectMatch) {
-                try {
-                  gTh = JSON.parse(gThDirectMatch[1]);
-                } catch (e) {
-                  console.error("Failed to parse direct g_th JSON", e);
+            try {
+              // Safer parsing without complex regex
+              const parseJsonIndex = scriptContent.indexOf('$.parseJSON(');
+              if (parseJsonIndex !== -1) {
+                const startQuote = scriptContent.indexOf("'", parseJsonIndex);
+                const endQuote = scriptContent.indexOf("'", startQuote + 1);
+                if (startQuote !== -1 && endQuote !== -1) {
+                  const jsonStr = scriptContent.substring(startQuote + 1, endQuote).replace(/\\"/g, '"');
+                  gTh = JSON.parse(jsonStr);
+                }
+              } else {
+                // Try direct object parsing
+                const varIndex = scriptContent.indexOf('var g_th = {');
+                if (varIndex !== -1) {
+                  const endBrace = scriptContent.indexOf('};', varIndex);
+                  if (endBrace !== -1) {
+                    const jsonStr = scriptContent.substring(varIndex + 11, endBrace + 1);
+                    gTh = JSON.parse(jsonStr);
+                  }
                 }
               }
+            } catch (e) {
+              console.error("Failed to parse g_th JSON", e);
             }
           }
         });
