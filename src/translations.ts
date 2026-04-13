@@ -131,6 +131,7 @@ export const translations = {
     status_waiting_window: "Waiting for window response ({time}s)...",
     status_retrying_html: "Retrying HTML extraction ({time}s)...",
     status_extracting_html: "Extracting HTML...",
+    status_parsing_html: "Parsing HTML...",
     status_extracting_html_cdp: "Extracting HTML (CDP)...",
     status_extracting_html_fallback: "Extracting HTML (fallback)...",
     status_extracting_html_safe: "Extracting HTML (safe fallback)...",

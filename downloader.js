@@ -979,6 +979,11 @@ async function safeGet(url, config = {}, taskState = null, onProgress = null, ex
         new Promise((_, reject) => setTimeout(() => reject(new Error('Parse timeout')), 20000))
       ]);
       clearTimeout(parseTimeoutId);
+      
+      if (typeof data === 'string' && data.length > 5000000) {
+        console.warn(`[WARNING] safeGet data is extremely large (${data.length} bytes), truncating to prevent freeze.`);
+        data = data.substring(0, 5000000);
+      }
     } catch (parseErr) {
       clearTimeout(parseTimeoutId);
       throw new Error(`Data parsing failed or timed out: ${parseErr.message}`);
@@ -1114,6 +1119,8 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             console.log(`HTML extraction failed for ${currentUrl}:`, e.message);
             throw e;
           }
+          if (onProgress) onProgress("Parsing HTML...");
+          await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
           $('.thumb a, .inner_thumb a').each((i, el) => {
@@ -1175,6 +1182,8 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
               throw e;
             }
           }
+          if (onProgress) onProgress("Parsing HTML...");
+          await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
           $('.grid-item a').each((i, el) => {
@@ -1270,6 +1279,8 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
               throw e;
             }
           }
+          if (onProgress) onProgress("Parsing HTML...");
+          await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
           $('.gallery a.cover').each((i, el) => {
@@ -1329,6 +1340,8 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           const res = await safeGet(url, {}, taskState, onProgress, scraperWin, true);
           html = res.data;
         }
+        if (onProgress) onProgress("Parsing HTML...");
+        await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         
         // Check if it's already a chapter page (has images in common reader containers)
@@ -1402,6 +1415,8 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             if (onProgress) onProgress("Executing JavaScript to find chapters...");
             try {
               const jsHtml = await fetchHtmlWithElectron(url, null, taskState, onProgress);
+              if (onProgress) onProgress("Parsing HTML...");
+              await new Promise(resolve => setTimeout(resolve, 50));
               const $js = cheerio.load(jsHtml);
               for (const selector of chapterSelectors) {
                 $js(selector).each((i, el) => {
@@ -1537,6 +1552,8 @@ export async function startDownload(task, win, settings) {
         }
       } else if (hostname.includes('rule34.paheal.net')) {
         const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+        await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(res.data);
         $('.shm-thumb').each((i, el) => {
           let src = $(el).find('img').attr('src');
@@ -1551,6 +1568,8 @@ export async function startDownload(task, win, settings) {
           const galleryId = match[1];
           try {
             const html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
+            win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+            await new Promise(resolve => setTimeout(resolve, 50));
             const $ = cheerio.load(html);
             
             let galleryData = null;
@@ -1640,6 +1659,8 @@ export async function startDownload(task, win, settings) {
           const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null, true);
           html = res.data;
         }
+        if (onProgress) onProgress("Parsing HTML...");
+        await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         title = $('title').text().replace(' - 3hentai', '').trim();
         
@@ -1739,12 +1760,12 @@ export async function startDownload(task, win, settings) {
         }
         
         console.log(`[TRACE] Loading HTML into cheerio...`);
-        if (onProgress) onProgress("Parsing HTML...");
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
         // Yield event loop to ensure progress message is sent before potentially blocking cheerio.load
-        await new Promise(resolve => setTimeout(resolve, 50));
+        await new Promise(resolve => setTimeout(resolve, 200));
         const $ = cheerio.load(html);
         console.log(`[TRACE] Cheerio loaded.`);
-        if (onProgress) onProgress("Extracting metadata...");
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Extracting metadata..." });
         title = $('h1').text().trim();
         
         // Extract artist
@@ -1808,7 +1829,7 @@ export async function startDownload(task, win, settings) {
         // Extract the g_th JSON which contains the extensions for each page
         // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
         // w = .webp, j = .jpg, p = .png, g = .gif
-        if (onProgress) onProgress("Extracting image data...");
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Extracting image data..." });
         let gTh = {};
         $('script').each((i, el) => {
           const scriptContent = $(el).html();
@@ -1905,6 +1926,8 @@ export async function startDownload(task, win, settings) {
             const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
             html = res.data;
           }
+          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+          await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           
           title = $('title').text().trim() || 'Chapter';
@@ -2005,6 +2028,8 @@ export async function startDownload(task, win, settings) {
       }
       
       if (html) {
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+        await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         title = $('title').text().replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
         
