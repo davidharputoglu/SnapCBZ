@@ -158,6 +158,8 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (str === "Extracting HTML (CDP)...") return t("status_extracting_html_cdp" as any) || "Extracting HTML (CDP)...";
     if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
     if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
+    if (str === "Extracting metadata...") return t("status_extracting_metadata" as any) || "Extracting metadata...";
+    if (str === "Extracting image data..." || str === "status_extracting_image_data") return t("status_extracting_image_data" as any) || "Extracting image data...";
     
     if (str.startsWith("Retrying HTML extraction")) {
       const time = str.match(/\d+/)?.[0] || "0";

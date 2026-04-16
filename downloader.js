@@ -1829,11 +1829,13 @@ export async function startDownload(task, win, settings) {
         // Extract the g_th JSON which contains the extensions for each page
         // Format: {"1":"w,1074,1516", "2":"j,1075,1518", ...}
         // w = .webp, j = .jpg, p = .png, g = .gif
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Extracting image data..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_extracting_image_data" });
+        console.log(`[TRACE] Extracting image data for ${url}...`);
         let gTh = {};
         $('script').each((i, el) => {
           const scriptContent = $(el).html();
           if (scriptContent && scriptContent.includes('g_th')) {
+            console.log(`[TRACE] Found script containing g_th`);
             try {
               // Safer parsing without complex regex
               const parseJsonIndex = scriptContent.indexOf('$.parseJSON(');
@@ -1843,6 +1845,7 @@ export async function startDownload(task, win, settings) {
                 if (startQuote !== -1 && endQuote !== -1) {
                   const jsonStr = scriptContent.substring(startQuote + 1, endQuote).replace(/\\"/g, '"');
                   gTh = JSON.parse(jsonStr);
+                  console.log(`[TRACE] Parsed g_th via $.parseJSON, keys: ${Object.keys(gTh).length}`);
                 }
               } else {
                 // Try direct object parsing
@@ -1852,6 +1855,7 @@ export async function startDownload(task, win, settings) {
                   if (endBrace !== -1) {
                     const jsonStr = scriptContent.substring(varIndex + 11, endBrace + 1);
                     gTh = JSON.parse(jsonStr);
+                    console.log(`[TRACE] Parsed g_th via var g_th, keys: ${Object.keys(gTh).length}`);
                   }
                 }
               }
@@ -1862,11 +1866,13 @@ export async function startDownload(task, win, settings) {
         });
 
         let totalPages = Object.keys(gTh).length || loadPages;
+        console.log(`[TRACE] totalPages: ${totalPages}, baseUrl: ${baseUrl}`);
         if (totalPages > 10000) {
           console.warn(`Unreasonably large totalPages (${totalPages}), capping at 10000`);
           totalPages = 10000;
         }
         if (totalPages > 0 && baseUrl) {
+          console.log(`[TRACE] Using g_th and baseUrl to construct image URLs`);
           for (let i = 1; i <= totalPages; i++) {
             let extCode = 'j';
             if (gTh[i]) {
@@ -1886,6 +1892,7 @@ export async function startDownload(task, win, settings) {
             imageUrls.push(realSrc);
           }
         } else {
+          console.log(`[TRACE] Falling back to parsing img tags`);
           // Fallback if g_th or baseUrl fails
           $('.gthumb img, .thumb img, .gallery_thumb img, .inner_thumb img').each((i, el) => {
             let src = $(el).attr('data-src') || $(el).attr('src');
@@ -1899,6 +1906,7 @@ export async function startDownload(task, win, settings) {
           
           // If still no images, try to find them in the gallery container
           if (imageUrls.length === 0) {
+            console.log(`[TRACE] Still no images, trying gallery container`);
             $('.gallery_content img, #append_image img, .image-container img').each((i, el) => {
               let src = $(el).attr('data-src') || $(el).attr('src');
               if (src) {
@@ -1907,6 +1915,7 @@ export async function startDownload(task, win, settings) {
               }
             });
           }
+          console.log(`[TRACE] Fallback found ${imageUrls.length} images`);
         }
       } else {
         // Generic Fallback for Manhwa / Manga / Webtoon sites
