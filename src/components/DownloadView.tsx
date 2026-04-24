@@ -151,15 +151,20 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     if (str === "Cloudflare window closed by user") return t("error_cf_closed" as any);
     if (str === "No images found on this page.") return t("error_no_images" as any);
     if (str === "Cannot download images. The site blocks access or requires a Referer.") return t("error_dl_blocked" as any);
-    if (str === "Scraping site...") return t("status_scraping_site" as any);
+    if (str === "status_scraping_site" || str === "Scraping site...") return t("status_scraping_site" as any);
     if (str === "Please wait or solve the captcha if necessary...") return t("cf_wait" as any);
-    if (str === "Extracting HTML...") return t("status_extracting_html" as any);
-    if (str === "Parsing HTML...") return t("status_parsing_html" as any) || "Parsing HTML...";
-    if (str === "Extracting HTML (CDP)...") return t("status_extracting_html_cdp" as any) || "Extracting HTML (CDP)...";
-    if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
-    if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
-    if (str === "Extracting metadata...") return t("status_extracting_metadata" as any) || "Extracting metadata...";
+    if (str === "status_extracting_html" || str === "Extracting HTML...") return t("status_extracting_html" as any);
+    if (str === "status_parsing_html" || str === "Parsing HTML...") return t("status_parsing_html" as any) || "Parsing HTML...";
+    if (str === "status_extracting_html_cdp" || str === "Extracting HTML (CDP)...") return t("status_extracting_html_cdp" as any) || "Extracting HTML (CDP)...";
+    if (str === "status_extracting_html_fallback" || str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
+    if (str === "status_extracting_html_safe" || str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
+    if (str === "status_extracting_metadata" || str === "Extracting metadata...") return t("status_extracting_metadata" as any) || "Extracting metadata...";
     if (str === "Extracting image data..." || str === "status_extracting_image_data") return t("status_extracting_image_data" as any) || "Extracting image data...";
+    
+    if (str === "status_clearing_cookies" || str === "Access denied. Clearing cookies and retrying...") return t("status_clearing_cookies" as any) || "Access denied. Clearing cookies and retrying...";
+    if (str === "status_clearing_cookies_bypass" || str === "Clearing cookies to bypass block...") return t("status_clearing_cookies_bypass" as any) || "Clearing cookies to bypass block...";
+    if (str === "status_executing_js_chapters" || str === "Executing JavaScript to find chapters...") return t("status_executing_js_chapters" as any) || "Executing JavaScript to find chapters...";
+    if (str === "status_extraction_stuck" || str === "Extraction stuck. Reloading...") return t("status_extraction_stuck" as any) || "Extraction stuck. Reloading...";
     
     if (str.startsWith("Retrying HTML extraction")) {
       const time = str.match(/\d+/)?.[0] || "0";
@@ -218,16 +223,12 @@ const TaskCard: React.FC<{ task: DownloadTask; onRemove: () => void; onCancel: (
     const retryingHtmlMatch = str.match(/^Retrying HTML extraction \((\d+)s\)\.\.\.$/);
     if (retryingHtmlMatch) return t("status_retrying_html" as any, { time: retryingHtmlMatch[1] });
     
-    if (str === "Extracting HTML...") return t("status_extracting_html" as any);
-    if (str === "Parsing HTML...") return t("status_parsing_html" as any) || "Parsing HTML...";
-    if (str === "Extracting HTML (fallback)...") return t("status_extracting_html_fallback" as any);
-    if (str === "Extracting HTML (safe fallback)...") return t("status_extracting_html_safe" as any);
-    if (str === "Logging in...") return t("status_logging_in" as any);
-    if (str === "Initializing Cloudflare bypass...") return t("status_cf_init" as any);
-    if (str === "Fetching HTML (fast)...") return t("status_fetching_fast" as any);
-    if (str === "Fetching HTML via existing window...") return t("status_fetching_existing" as any);
-    if (str === "Fetching HTML (safe fallback)...") return t("status_fetching_safe" as any);
-    if (str === "Queued for scraping...") return t("status_queued_scraping" as any);
+    if (str === "status_logging_in" || str === "Logging in...") return t("status_logging_in" as any);
+    if (str === "status_cf_init" || str === "Initializing Cloudflare bypass...") return t("status_cf_init" as any);
+    if (str === "status_fetching_fast" || str === "Fetching HTML (fast)...") return t("status_fetching_fast" as any);
+    if (str === "status_fetching_existing" || str === "Fetching HTML via existing window...") return t("status_fetching_existing" as any);
+    if (str === "status_fetching_safe" || str === "Fetching HTML (safe fallback)...") return t("status_fetching_safe" as any);
+    if (str === "status_queued_scraping" || str === "Queued for scraping...") return t("status_queued_scraping" as any);
     
     return str;
   };

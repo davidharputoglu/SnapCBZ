@@ -197,11 +197,11 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
   try {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
     
-    if (onProgress) onProgress("Fetching HTML (fast)...");
+    if (onProgress) onProgress("status_fetching_fast");
     
     // Try to fetch using the existing window's context to bypass Cloudflare TLS fingerprinting
     if (existingWin) {
-      if (onProgress) onProgress("Fetching HTML via existing window...");
+      if (onProgress) onProgress("status_fetching_existing");
       try {
         const currentUrlPromise = existingWin.webContents.executeJavaScript('window.location.href');
         const currentUrl = await Promise.race([
@@ -242,7 +242,7 @@ export async function fastFetchHtml(url, existingWin = null, taskState = null, o
       }
     }
 
-    if (onProgress) onProgress("Fetching HTML (fast)...");
+    if (onProgress) onProgress("status_fetching_fast");
 
     const defaultUserAgent = session.defaultSession.getUserAgent();
     const cleanUserAgent = defaultUserAgent.replace(/SnapCBZ\/[0-9\.]+\s*/, '').replace(/Electron\/[0-9\.]+\s*/, '');
@@ -408,7 +408,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
   setupAdblock();
   const executeFetch = async () => {
     if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
-    if (onProgress) onProgress("Initializing Cloudflare bypass...");
+    if (onProgress) onProgress("status_cf_init");
     // Quick check if we still need to bypass Cloudflare (maybe another window solved it while we were queued)
     if (!existingWin) {
       try {
@@ -533,7 +533,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (!hasClearedCookies && (title.includes('Access denied') || title.includes('403 Forbidden'))) {
               hasClearedCookies = true;
               console.log("Access denied/403 detected, clearing cookies and retrying...");
-              if (onProgress) onProgress("Access denied. Clearing cookies and retrying...");
+              if (onProgress) onProgress("status_clearing_cookies");
               try {
                 await Promise.race([
                   session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] }),
@@ -593,7 +593,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (cloudflareTime === 30 && !hasClearedCookies) {
                hasClearedCookies = true;
                console.log("Stuck in Cloudflare loop, clearing cookies...");
-               if (onProgress) onProgress("Clearing cookies to bypass block...");
+               if (onProgress) onProgress("status_clearing_cookies_bypass");
                try {
                  await Promise.race([
                    session.fromPartition('persist:scraper').clearStorageData({ storages: ['cookies', 'serviceworkers', 'caches'] }),
@@ -639,7 +639,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
           
           // Success!
           try {
-            if (onProgress) onProgress(`Extracting HTML...`);
+            if (onProgress) onProgress("status_extracting_html");
             
             let html = '';
             let fetchSuccess = false;
@@ -719,7 +719,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             
             // 2. Fallback to executeJavaScript if fetch failed
             if (!fetchSuccess) {
-              if (onProgress) onProgress(`Extracting HTML (fallback)...`);
+              if (onProgress) onProgress("status_extracting_html_fallback");
               try {
                 const script = `
                   (function() {
@@ -744,7 +744,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 
             // 3. Final fallback: try to get just the body if everything else fails
             if (!fetchSuccess) {
-               if (onProgress) onProgress(`Extracting HTML (safe fallback)...`);
+               if (onProgress) onProgress("status_extracting_html_safe");
                try {
                  const script = `
                    (function() {
@@ -785,7 +785,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
             if (timeElapsed > 60 && !hasClearedCookies) {
               hasClearedCookies = true;
               console.log("Extraction stuck, clearing cookies and reloading...");
-              if (onProgress) onProgress("Extraction stuck. Reloading...");
+              if (onProgress) onProgress("status_extraction_stuck");
               try {
                 await Promise.race([
                   session.fromPartition('persist:scraper').clearStorageData({ storages: ['serviceworkers', 'caches'] }),
@@ -908,7 +908,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
     if (activeElectronScrapers < maxConcurrentScrapers) {
       task();
     } else {
-      if (onProgress) onProgress("Queued for scraping...");
+      if (onProgress) onProgress("status_queued_scraping");
       electronScraperQueue.push(task);
     }
   });
@@ -918,7 +918,7 @@ async function fetchHtmlWithElectron(url, existingWin = null, taskState = null, 
 async function safeGet(url, config = {}, taskState = null, onProgress = null, existingWin = null, skipElectronFallback = false) {
   setupAdblock();
   if (taskState && taskState.isCancelled) throw new Error("Cancelled by user");
-  if (onProgress) onProgress("Fetching HTML (safe fallback)...");
+  if (onProgress) onProgress("status_fetching_safe");
   
   const controller = new AbortController();
   if (taskState && taskState.controllers) taskState.controllers.push(controller);
@@ -1119,7 +1119,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
             console.log(`HTML extraction failed for ${currentUrl}:`, e.message);
             throw e;
           }
-          if (onProgress) onProgress("Parsing HTML...");
+          if (onProgress) onProgress("status_parsing_html");
           await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
@@ -1182,7 +1182,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
               throw e;
             }
           }
-          if (onProgress) onProgress("Parsing HTML...");
+          if (onProgress) onProgress("status_parsing_html");
           await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
@@ -1279,7 +1279,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
               throw e;
             }
           }
-          if (onProgress) onProgress("Parsing HTML...");
+          if (onProgress) onProgress("status_parsing_html");
           await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           let found = 0;
@@ -1340,7 +1340,7 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           const res = await safeGet(url, {}, taskState, onProgress, scraperWin, true);
           html = res.data;
         }
-        if (onProgress) onProgress("Parsing HTML...");
+        if (onProgress) onProgress("status_parsing_html");
         await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         
@@ -1412,10 +1412,10 @@ export async function fetchGalleryLinks(url, taskId = null, settings = {}, onPro
           
           // If no chapters found, try with Electron to execute JS
           if (foundChapters.length === 0 && !isChapterPage) {
-            if (onProgress) onProgress("Executing JavaScript to find chapters...");
+            if (onProgress) onProgress("status_executing_js_chapters");
             try {
               const jsHtml = await fetchHtmlWithElectron(url, null, taskState, onProgress);
-              if (onProgress) onProgress("Parsing HTML...");
+              if (onProgress) onProgress("status_parsing_html");
               await new Promise(resolve => setTimeout(resolve, 50));
               const $js = cheerio.load(jsHtml);
               for (const selector of chapterSelectors) {
@@ -1491,7 +1491,7 @@ export async function startDownload(task, win, settings) {
 
     const { id, url, type, category, language, copyright, character } = task;
     
-    win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Scraping site..." });
+    win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_scraping_site" });
     
     let imageUrls = [];
     let title = 'Gallery';
@@ -1527,12 +1527,12 @@ export async function startDownload(task, win, settings) {
       });
       if (account) {
         try {
-          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Logging in..." });
+          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_logging_in" });
           await autoLogin(account.url, account.username, account.password);
         } catch (e) {
           console.error("Auto-login failed:", e);
         }
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Scraping site..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_scraping_site" });
       }
     }
 
@@ -1552,7 +1552,7 @@ export async function startDownload(task, win, settings) {
         }
       } else if (hostname.includes('rule34.paheal.net')) {
         const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null);
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_parsing_html" });
         await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(res.data);
         $('.shm-thumb').each((i, el) => {
@@ -1568,7 +1568,7 @@ export async function startDownload(task, win, settings) {
           const galleryId = match[1];
           try {
             const html = await fastFetchHtml(url, null, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }));
-            win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+            win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_parsing_html" });
             await new Promise(resolve => setTimeout(resolve, 50));
             const $ = cheerio.load(html);
             
@@ -1659,7 +1659,7 @@ export async function startDownload(task, win, settings) {
           const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), null, true);
           html = res.data;
         }
-        if (onProgress) onProgress("Parsing HTML...");
+        if (onProgress) onProgress("status_parsing_html");
         await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         title = $('title').text().replace(' - 3hentai', '').trim();
@@ -1760,12 +1760,12 @@ export async function startDownload(task, win, settings) {
         }
         
         console.log(`[TRACE] Loading HTML into cheerio...`);
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_parsing_html" });
         // Yield event loop to ensure progress message is sent before potentially blocking cheerio.load
         await new Promise(resolve => setTimeout(resolve, 200));
         const $ = cheerio.load(html);
         console.log(`[TRACE] Cheerio loaded.`);
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Extracting metadata..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_extracting_metadata" });
         title = $('h1').text().trim();
         
         // Extract artist
@@ -1935,7 +1935,7 @@ export async function startDownload(task, win, settings) {
             const res = await safeGet(url, {}, taskState, (msg) => win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: msg }), scraperWin, true);
             html = res.data;
           }
-          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+          win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_parsing_html" });
           await new Promise(resolve => setTimeout(resolve, 50));
           const $ = cheerio.load(html);
           
@@ -2037,7 +2037,7 @@ export async function startDownload(task, win, settings) {
       }
       
       if (html) {
-        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "Parsing HTML..." });
+        win.webContents.send('download-progress', { id, status: 'scraping', progress: 0, filename: "status_parsing_html" });
         await new Promise(resolve => setTimeout(resolve, 50));
         const $ = cheerio.load(html);
         title = $('title').text().replace(/[<>:"/\\|?*]+/g, '').trim() || 'Gallery';
